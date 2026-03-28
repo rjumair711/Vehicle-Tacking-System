@@ -111,107 +111,123 @@ export default function TripsPage() {
 
       {/* Trip Details Sheet */}
       <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
-        <SheetContent side="bottom" className="h-[80vh] max-h-[80vh] sm:max-w-2xl mx-auto">
+        <SheetContent
+          side="bottom"
+          className="h-[85vh] max-h-[85vh] sm:max-w-2xl mx-auto flex flex-col overflow-hidden"
+        >
           {selectedTrip ? (
             <>
-              <SheetHeader>
+              <SheetHeader className="px-5 pr-14 shrink-0">
                 <SheetTitle>{selectedTrip.vehicleName}</SheetTitle>
                 <SheetDescription>Trip Details</SheetDescription>
               </SheetHeader>
 
-              <div className="mt-6 grid gap-4 md:grid-cols-2">
-                {/* Basic Info */}
-                <Card className="border-border bg-muted/50">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm">Trip Duration</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-2xl font-bold text-foreground">{formatDuration(selectedTrip.duration)}</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {formatTime(selectedTrip.startTime)} - {selectedTrip.endTime ? formatTime(selectedTrip.endTime) : 'Ongoing'}
-                    </p>
-                  </CardContent>
-                </Card>
-
-                {/* Distance */}
-                <Card className="border-border bg-muted/50">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <Navigation2 className="h-4 w-4" />
-                      Distance
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-2xl font-bold text-foreground">{selectedTrip.distance} km</p>
-                  </CardContent>
-                </Card>
-
-                {/* Average Speed */}
-                <Card className="border-border bg-muted/50">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <Gauge className="h-4 w-4" />
-                      Average Speed
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-2xl font-bold text-foreground">{selectedTrip.averageSpeed} km/h</p>
-                  </CardContent>
-                </Card>
-
-                {/* Max Speed */}
-                <Card className="border-border bg-muted/50">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm">Max Speed</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-2xl font-bold text-foreground">{selectedTrip.maxSpeed} km/h</p>
-                  </CardContent>
-                </Card>
-
-                {/* Start Location */}
-                <Card className="border-border md:col-span-2">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <MapPin className="h-4 w-4" />
-                      Start Location
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-foreground font-mono text-sm">
-                      {selectedTrip.startLocation.lat.toFixed(4)}, {selectedTrip.startLocation.lng.toFixed(4)}
-                    </p>
-                  </CardContent>
-                </Card>
-
-                {/* End Location */}
-                {selectedTrip.endLocation && (
-                  <Card className="border-border md:col-span-2">
+              <div className="flex-1 overflow-y-auto px-5 pb-8">
+                <div className="mt-6 grid gap-4 md:grid-cols-2">
+                  {/* Trip Duration */}
+                  <Card className="border-border bg-muted/50">
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-sm flex items-center gap-2">
-                        <MapPin className="h-4 w-4" />
-                        End Location
-                      </CardTitle>
+                      <CardTitle className="text-sm">Trip Duration</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <p className="text-foreground font-mono text-sm">
-                        {selectedTrip.endLocation.lat.toFixed(4)}, {selectedTrip.endLocation.lng.toFixed(4)}
+                      <p className="text-2xl font-bold text-foreground">
+                        {formatDuration(selectedTrip.duration)}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {formatTime(selectedTrip.startTime)} -{" "}
+                        {selectedTrip.endTime ? formatTime(selectedTrip.endTime) : "Ongoing"}
                       </p>
                     </CardContent>
                   </Card>
-                )}
 
-                {/* Driver */}
-                {selectedTrip.driver && (
-                  <Card className="border-border md:col-span-2">
+                  {/* Distance */}
+                  <Card className="border-border bg-muted/50">
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Driver</CardTitle>
+                      <CardTitle className="flex items-center gap-2 text-sm">
+                        <Navigation2 className="h-4 w-4" />
+                        Distance
+                      </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <p className="text-foreground">{selectedTrip.driver}</p>
+                      <p className="text-2xl font-bold text-foreground">
+                        {selectedTrip.distance} km
+                      </p>
                     </CardContent>
                   </Card>
-                )}
+
+                  {/* Average Speed */}
+                  <Card className="border-border bg-muted/50">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="flex items-center gap-2 text-sm">
+                        <Gauge className="h-4 w-4" />
+                        Average Speed
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-2xl font-bold text-foreground">
+                        {selectedTrip.averageSpeed} km/h
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  {/* Max Speed */}
+                  <Card className="border-border bg-muted/50">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Max Speed</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-2xl font-bold text-foreground">
+                        {selectedTrip.maxSpeed} km/h
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  {/* Start Location */}
+                  <Card className="border-border md:col-span-2">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="flex items-center gap-2 text-sm">
+                        <MapPin className="h-4 w-4" />
+                        Start Location
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="font-mono text-sm text-foreground break-words">
+                        {selectedTrip.startLocation.lat.toFixed(4)},{" "}
+                        {selectedTrip.startLocation.lng.toFixed(4)}
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  {/* End Location */}
+                  {selectedTrip.endLocation && (
+                    <Card className="border-border md:col-span-2">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="flex items-center gap-2 text-sm">
+                          <MapPin className="h-4 w-4" />
+                          End Location
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="font-mono text-sm text-foreground break-words">
+                          {selectedTrip.endLocation.lat.toFixed(4)},{" "}
+                          {selectedTrip.endLocation.lng.toFixed(4)}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Driver */}
+                  {selectedTrip.driver && (
+                    <Card className="border-border md:col-span-2">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm">Driver</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="text-foreground">{selectedTrip.driver}</p>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
               </div>
             </>
           ) : null}

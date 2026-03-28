@@ -161,18 +161,23 @@ export default function GeofencesPage() {
 
       {/* Geofence Editor Sheet */}
       <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
-        <SheetContent side="bottom" className="h-[85vh] max-h-[85vh] sm:max-w-2xl mx-auto">
+        <SheetContent
+          side="bottom"
+          className="h-[85vh] max-h-[85vh] sm:max-w-2xl mx-auto flex flex-col overflow-hidden"
+        >
           {!isCreateMode && selectedGeofence ? (
             <>
-              <SheetHeader>
+              <SheetHeader className="px-5 pr-14">
                 <SheetTitle>Edit Geofence</SheetTitle>
                 <SheetDescription>Modify geofence settings</SheetDescription>
               </SheetHeader>
-              <GeofenceForm
-                geofence={selectedGeofence}
-                onSave={handleSaveGeofence}
-                onClose={() => setIsSheetOpen(false)}
-              />
+              <div className="flex-1 overflow-y-auto px-5 pb-8">
+                <GeofenceForm
+                  geofence={selectedGeofence}
+                  onSave={handleSaveGeofence}
+                  onClose={() => setIsSheetOpen(false)}
+                />
+              </div>
             </>
           ) : (
             <>
@@ -180,10 +185,13 @@ export default function GeofencesPage() {
                 <SheetTitle>Create Geofence</SheetTitle>
                 <SheetDescription>Set up a new virtual boundary</SheetDescription>
               </SheetHeader>
-              <GeofenceForm
-                onSave={handleSaveGeofence}
-                onClose={() => setIsSheetOpen(false)}
-              />
+              <div className="flex-1 overflow-y-auto px-5 pb-8">
+                <GeofenceForm
+                  geofence={selectedGeofence ?? undefined}
+                  onSave={handleSaveGeofence}
+                  onClose={() => setIsSheetOpen(false)}
+                />
+              </div>
             </>
           )}
         </SheetContent>
@@ -218,7 +226,7 @@ function GeofenceForm({ geofence, onSave, onClose }: GeofenceFormProps) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+    <form onSubmit={handleSubmit} className="mt-6 space-y-4 pb-6">
       <div>
         <label className="text-sm font-medium text-foreground">Geofence Name</label>
         <Input
@@ -304,7 +312,7 @@ function GeofenceForm({ geofence, onSave, onClose }: GeofenceFormProps) {
         </div>
       </div>
 
-      <div className="flex gap-2 pt-4">
+      <div className="flex gap-2 pt-4 pb-2">
         <Button type="button" variant="outline" onClick={onClose} className="flex-1">
           Cancel
         </Button>

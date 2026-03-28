@@ -18,10 +18,10 @@ export default function AlertsPage() {
   const [isSheetOpen, setIsSheetOpen] = useState(false);
 
   useEffect(() => {
-  if (!isLoading && !user) {
-    window.location.href = "/";
-  }
-}, [isLoading, user]);
+    if (!isLoading && !user) {
+      window.location.href = "/";
+    }
+  }, [isLoading, user]);
 
   useEffect(() => {
     setAlerts(generateMockAlerts());
@@ -65,11 +65,11 @@ export default function AlertsPage() {
       prev.map((alert) =>
         alert.id === alertId
           ? {
-              ...alert,
-              isResolved: true,
-              resolvedAt: new Date(),
-              resolvedBy: user?.email,
-            }
+            ...alert,
+            isResolved: true,
+            resolvedAt: new Date(),
+            resolvedBy: user?.email,
+          }
           : alert
       )
     );
@@ -196,94 +196,105 @@ export default function AlertsPage() {
 
       {/* Alert Details Sheet */}
       <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
-        <SheetContent side="bottom" className="h-[80vh] max-h-[80vh] sm:max-w-2xl mx-auto">
+        <SheetContent
+          side="bottom"
+          className="h-[80vh] max-h-[80vh] sm:max-w-2xl mx-auto overflow-hidden"
+        >
           {selectedAlert ? (
-            <>
-              <SheetHeader>
-                <div className="flex items-start justify-between">
-                  <div>
-                    <SheetTitle>{selectedAlert.vehicleName}</SheetTitle>
+            <div className="flex h-full flex-col">
+              <SheetHeader className="shrink-0 pr-12">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <SheetTitle className="pr-2">{selectedAlert.vehicleName}</SheetTitle>
                     <SheetDescription>{selectedAlert.message}</SheetDescription>
                   </div>
-                  <Badge variant={getPriorityColor(selectedAlert.priority)}>
+
+                  <Badge
+                    variant={getPriorityColor(selectedAlert.priority)}
+                    className="shrink-0"
+                  >
                     {selectedAlert.priority.toUpperCase()}
                   </Badge>
                 </div>
               </SheetHeader>
 
-              <div className="mt-6 space-y-4">
-                {/* Alert Type */}
-                <Card className="border-border bg-muted/50">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm">Alert Type</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <Badge>{selectedAlert.type.toUpperCase()}</Badge>
-                  </CardContent>
-                </Card>
-
-                {/* Time */}
-                <Card className="border-border">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <Clock className="h-4 w-4" />
-                      Time
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="text-foreground">
-                    {selectedAlert.timestamp.toLocaleString()}
-                  </CardContent>
-                </Card>
-
-                {/* Location */}
-                {selectedAlert.location && (
-                  <Card className="border-border">
+              <div className="mt-6 flex-1 overflow-y-auto space-y-4 pb-10 px-4">
+                <div className="space-y-4">
+                  {/* Alert Type */}
+                  <Card className="border-border bg-muted/50">
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-sm flex items-center gap-2">
-                        <MapPin className="h-4 w-4" />
-                        Location
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="text-foreground font-mono text-sm">
-                      {selectedAlert.location.lat.toFixed(6)}, {selectedAlert.location.lng.toFixed(6)}
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Status and Resolution */}
-                {selectedAlert.isResolved ? (
-                  <Card className="border-green-500/20 bg-green-500/5">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm flex items-center gap-2">
-                        <CheckCircle className="h-4 w-4 text-green-500" />
-                        Resolved
-                      </CardTitle>
+                      <CardTitle className="text-sm">Alert Type</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <div className="space-y-1 text-sm">
-                        <p className="text-foreground">
-                          Resolved by: <span className="font-mono">{selectedAlert.resolvedBy}</span>
-                        </p>
-                        <p className="text-muted-foreground">
-                          {selectedAlert.resolvedAt?.toLocaleString()}
-                        </p>
-                      </div>
+                      <Badge>{selectedAlert.type.toUpperCase()}</Badge>
                     </CardContent>
                   </Card>
-                ) : (
-                  <Button
-                    onClick={() => {
-                      handleResolveAlert(selectedAlert.id);
-                      setIsSheetOpen(false);
-                    }}
-                    className="w-full"
-                  >
-                    <CheckCircle className="mr-2 h-4 w-4" />
-                    Resolve Alert
-                  </Button>
-                )}
+
+                  {/* Time */}
+                  <Card className="border-border bg-muted/50">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <Clock className="h-4 w-4" />
+                        Time
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="text-foreground">
+                      {selectedAlert.timestamp.toLocaleString()}
+                    </CardContent>
+                  </Card>
+
+                  {/* Location */}
+                  {selectedAlert.location && (
+                    <Card className="border-border bg-muted/50">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm flex items-center gap-2">
+                          <MapPin className="h-4 w-4" />
+                          Location
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="text-foreground font-mono text-sm break-words">
+                        {selectedAlert.location.lat.toFixed(6)},{" "}
+                        {selectedAlert.location.lng.toFixed(6)}
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Status and Resolution */}
+                  {selectedAlert.isResolved ? (
+                    <Card className="border-green-500/20 bg-green-500/5">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm flex items-center gap-2">
+                          <CheckCircle className="h-4 w-4 text-green-500" />
+                          Resolved
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-1 text-sm">
+                          <p className="text-foreground">
+                            Resolved by:{" "}
+                            <span className="font-mono">{selectedAlert.resolvedBy}</span>
+                          </p>
+                          <p className="text-muted-foreground">
+                            {selectedAlert.resolvedAt?.toLocaleString()}
+                          </p>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <Button
+                      onClick={() => {
+                        handleResolveAlert(selectedAlert.id);
+                        setIsSheetOpen(false);
+                      }}
+                      className="w-full"
+                    >
+                      <CheckCircle className="mr-2 h-4 w-4" />
+                      Resolve Alert
+                    </Button>
+                  )}
+                </div>
               </div>
-            </>
+            </div>
           ) : null}
         </SheetContent>
       </Sheet>

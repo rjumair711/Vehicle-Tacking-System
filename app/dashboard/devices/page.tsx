@@ -149,129 +149,141 @@ export default function DevicesPage() {
 
       {/* Device Details Sheet */}
       <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
-        <SheetContent side="bottom" className="h-[80vh] max-h-[80vh] sm:max-w-2xl mx-auto">
+        <SheetContent
+          side="bottom"
+          className="h-[85vh] max-h-[85vh] sm:max-w-2xl mx-auto flex flex-col overflow-hidden"
+        >
           {selectedDevice ? (
             <>
-              <SheetHeader>
+              <SheetHeader className="px-5 pr-14 shrink-0">
                 <SheetTitle>{selectedDevice.vehicleName}</SheetTitle>
                 <SheetDescription>Device Information</SheetDescription>
               </SheetHeader>
 
-              <div className="mt-6 grid gap-4 md:grid-cols-2">
-                {/* Status */}
-                <Card className="border-border bg-muted/50">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm">Device Status</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <Badge variant={getStatusColor(selectedDevice.status)}>
-                      {selectedDevice.status.toUpperCase()}
-                    </Badge>
-                  </CardContent>
-                </Card>
-
-                {/* IMEI */}
-                <Card className="border-border bg-muted/50">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm">IMEI</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="font-mono text-sm text-foreground">{selectedDevice.imei}</p>
-                  </CardContent>
-                </Card>
-
-                {/* Battery */}
-                <Card className="border-border">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <Battery className="h-4 w-4" />
-                      Battery Level
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 h-3 bg-muted rounded-full overflow-hidden">
-                        <div
-                          className={`h-full ${
-                            selectedDevice.battery > 50
-                              ? 'bg-green-500'
-                              : selectedDevice.battery > 20
-                              ? 'bg-yellow-500'
-                              : 'bg-destructive'
-                          }`}
-                          style={{ width: `${selectedDevice.battery}%` }}
-                        />
-                      </div>
-                      <span className="text-lg font-bold text-foreground">{selectedDevice.battery}%</span>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Signal */}
-                <Card className="border-border">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <Signal className="h-4 w-4" />
-                      Signal Strength
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      <p className="font-mono text-sm text-foreground">{selectedDevice.signalStrength} dBm</p>
-                      <p className="text-sm text-muted-foreground">{getSignalQuality(selectedDevice.signalStrength)}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Last Ping */}
-                <Card className="border-border">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <Clock className="h-4 w-4" />
-                      Last Ping
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-sm text-foreground">
-                      {selectedDevice.lastPing.toLocaleTimeString()}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {Math.floor((Date.now() - selectedDevice.lastPing.getTime()) / 1000)}s ago
-                    </p>
-                  </CardContent>
-                </Card>
-
-                {/* Sim Card */}
-                {selectedDevice.simCard && (
-                  <Card className="border-border">
+              <div className="flex-1 overflow-y-auto px-5 pb-8">
+                <div className="mt-6 grid gap-4 md:grid-cols-2">
+                  {/* Device Status */}
+                  <Card className="border-border bg-muted/50">
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">SIM Card</CardTitle>
+                      <CardTitle className="text-sm">Device Status</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <p className="font-mono text-sm text-foreground">{selectedDevice.simCard}</p>
+                      <Badge variant={getStatusColor(selectedDevice.status)}>
+                        {selectedDevice.status.toUpperCase()}
+                      </Badge>
                     </CardContent>
                   </Card>
-                )}
 
-                {/* Vehicle ID */}
-                <Card className="border-border">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm">Vehicle ID</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="font-mono text-sm text-foreground">{selectedDevice.vehicleId}</p>
-                  </CardContent>
-                </Card>
-              </div>
+                  {/* IMEI */}
+                  <Card className="border-border bg-muted/50">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">IMEI</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="font-mono text-sm text-foreground break-all">
+                        {selectedDevice.imei}
+                      </p>
+                    </CardContent>
+                  </Card>
 
-              {/* Actions */}
-              <div className="mt-6 flex gap-2">
-                <Button variant="outline" className="flex-1">
-                  Test Connection
-                </Button>
-                <Button variant="outline" className="flex-1">
-                  Edit Settings
-                </Button>
+                  {/* Battery Level */}
+                  <Card className="border-border">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="flex items-center gap-2 text-sm">
+                        <Battery className="h-4 w-4" />
+                        Battery Level
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex items-center gap-2">
+                        <div className="h-3 flex-1 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className={`h-full ${selectedDevice.battery > 50
+                              ? 'bg-green-500'
+                              : selectedDevice.battery > 20
+                                ? 'bg-yellow-500'
+                                : 'bg-destructive'
+                              }`}
+                            style={{ width: `${selectedDevice.battery}%` }}
+                          />
+                        </div>
+                        <span className="text-lg font-bold text-foreground">
+                          {selectedDevice.battery}%
+                        </span>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Signal Strength */}
+                  <Card className="border-border">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="flex items-center gap-2 text-sm">
+                        <Signal className="h-4 w-4" />
+                        Signal Strength
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2">
+                        <p className="font-mono text-sm text-foreground">
+                          {selectedDevice.signalStrength} dBm
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          {getSignalQuality(selectedDevice.signalStrength)}
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Last Ping */}
+                  <Card className="border-border">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="flex items-center gap-2 text-sm">
+                        <Clock className="h-4 w-4" />
+                        Last Ping
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-foreground">
+                        {selectedDevice.lastPing.toLocaleString()}
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  {/* SIM Card */}
+                  {selectedDevice.simCard && (
+                    <Card className="border-border">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm">SIM Card</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="font-mono text-sm text-foreground break-all">
+                          {selectedDevice.simCard}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Vehicle ID */}
+                  <Card className="border-border">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Vehicle ID</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="font-mono text-sm text-foreground break-all">
+                        {selectedDevice.vehicleId}
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                <div className="mt-6 flex gap-2 pb-2">
+                  <Button variant="outline" className="flex-1">
+                    Test Connection
+                  </Button>
+                  <Button variant="outline" className="flex-1">
+                    Edit Settings
+                  </Button>
+                </div>
               </div>
             </>
           ) : null}
