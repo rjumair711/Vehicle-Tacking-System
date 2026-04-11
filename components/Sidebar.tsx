@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname } from 'next/navigation';  // Import usePathname to track the current path
 import { useAuth } from '@/lib/authContext';
 import {
   MapPin,
@@ -38,7 +38,7 @@ const navItems: NavItem[] = [
 ];
 
 export function Sidebar() {
-  const pathname = usePathname();
+  const pathname = usePathname(); // Track the current route
   const { user, logout } = useAuth();
 
   const visibleItems = navItems.filter((item) => {
@@ -56,24 +56,28 @@ export function Sidebar() {
 
       {/* Navigation Items */}
       <nav className="flex-1 space-y-2 overflow-y-auto px-3 py-4">
-        {visibleItems.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
-                isActive
-                  ? 'bg-sidebar-primary text-sidebar-primary-foreground'
-                  : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-              )}
-            >
-              {item.icon}
-              <span>{item.label}</span>
-            </Link>
-          );
-        })}
+{visibleItems.map((item) => {
+  // Fix: Use exact match for the base Dashboard, startsWith for others
+  const isActive = item.href === '/dashboard' 
+    ? pathname === item.href 
+    : pathname.startsWith(item.href);
+
+  return (
+    <Link
+      key={item.href}
+      href={item.href}
+      className={cn(
+        'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+        isActive
+          ? 'bg-sidebar-primary text-sidebar-primary-foreground' 
+          : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+      )}
+    >
+      {item.icon}
+      <span>{item.label}</span>
+    </Link>
+  );
+})}
       </nav>
 
       {/* Bottom Section */}
@@ -82,7 +86,7 @@ export function Sidebar() {
           href="/dashboard/settings"
           className={cn(
             'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
-            pathname === '/settings'
+            pathname === '/dashboard/settings'
               ? 'bg-sidebar-primary text-sidebar-primary-foreground'
               : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
           )}

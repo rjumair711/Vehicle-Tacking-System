@@ -29,7 +29,7 @@ export interface Vehicle {
   id: string;
   name: string;
   licensePlate: string;
-  status: VehicleStatus;
+  status: 'online' | 'offline' | 'idle' | 'moving' | 'parked';
   location: Location;
   currentSpeed: number;
   totalDistance: number;

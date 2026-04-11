@@ -181,3 +181,24 @@
 .leaflet-tile {
   image-rendering: auto;
 }
+
+/* Active item styles */
+.bg-sidebar-primary {
+  background-color: #3b82f6; /* Blue color for active item */
+}
+
+.text-sidebar-primary-foreground {
+  color: white;  /* active item text color */
+}
+
+.text-sidebar-foreground {
+  color: #6b7280;  /* inactive item text color */
+}
+
+.hover\:bg-sidebar-accent:hover {
+  background-color: #f3f4f6;  /* hover background */
+}
+
+.hover\:text-sidebar-accent-foreground:hover {
+  color: #1f2937;  /* hover text color */
+}

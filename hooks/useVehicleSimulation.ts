@@ -26,8 +26,20 @@ export function useVehicleSimulation(initialVehicles: Vehicle[], enabled: boolea
     simulationRef.current = setInterval(() => {
       setVehicles((prevVehicles) =>
         prevVehicles.map((vehicle) => {
-          if (vehicle.status === "offline") return vehicle;
+          if (vehicle.status === "offline") return vehicle; // Skip offline vehicles
 
+          let updatedVehicle = { ...vehicle };
+
+          // If vehicle is parked, prevent movement and status change
+          if (vehicle.status === "parked") {
+            // No movement for parked vehicles
+            updatedVehicle.location.timestamp = new Date();
+            updatedVehicle.status = "parked"; // Keep status as parked
+            updatedVehicle.currentSpeed = 0;  // No speed for parked vehicles
+            return updatedVehicle;
+          }
+
+          // Simulate movement for non-parked vehicles
           const moveDistance = Math.random() * 0.002; // ~200m
           const moveAngle = Math.random() * Math.PI * 2;
 
@@ -42,6 +54,7 @@ export function useVehicleSimulation(initialVehicles: Vehicle[], enabled: boolea
 
           const distanceIncrease = (newSpeed / 3600) * 0.1;
 
+          // Randomly change the status
           let status = vehicle.status;
           if (Math.random() < 0.01) {
             const statuses: Array<"online" | "idle" | "moving" | "parked"> = [
@@ -53,7 +66,8 @@ export function useVehicleSimulation(initialVehicles: Vehicle[], enabled: boolea
             status = statuses[Math.floor(Math.random() * statuses.length)];
           }
 
-          return {
+          // Update the vehicle data
+          updatedVehicle = {
             ...vehicle,
             location: {
               ...vehicle.location,
@@ -69,6 +83,8 @@ export function useVehicleSimulation(initialVehicles: Vehicle[], enabled: boolea
             status,
             lastUpdate: new Date(),
           };
+
+          return updatedVehicle;
         })
       );
     }, 2000);

@@ -57,11 +57,12 @@ export function VehicleMap({ vehicles, selectedVehicleId, onVehicleSelect }: Veh
         zoom={12}
         scrollWheelZoom
         className="h-full w-full"
+        attributionControl={false}
       >
         <FixMapSize />
         {/* OpenStreetMap tiles */}
         <TileLayer
-          attribution='&copy; OpenStreetMap contributors'
+          attribution=''
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
