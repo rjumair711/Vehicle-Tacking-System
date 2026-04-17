@@ -1,83 +1,125 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { User, UserRole, AuthContextType } from '@/types';
-import { mockUsers } from './mockData';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+
+type UserRole = 'ADMIN' | 'USER';
+
+interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  company?: string | null;
+}
+
+interface AuthContextType {
+  user: User | null;
+  isLoading: boolean;
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
+  checkPermission: (requiredRole: UserRole) => boolean;
+}
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-const DEMO_CREDENTIALS = {
-  'admin@fleettrack.com': 'admin123',
-  'manager@fleettrack.com': 'manager123',
-  'operator@fleettrack.com': 'operator123',
-  'viewer@fleettrack.com': 'viewer123',
-};
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Initialize from localStorage
-  useEffect(() => {
-    const savedUser = localStorage.getItem('currentUser');
-    if (savedUser) {
-      try {
-        setUser(JSON.parse(savedUser));
-      } catch (error) {
-        console.error('Failed to parse saved user:', error);
+  const refreshUser = async () => {
+    try {
+      const response = await fetch('/api/auth/me', {
+        method: 'GET',
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        setUser(null);
+        return;
       }
+
+      const data = await response.json();
+      setUser(data.user ?? null);
+    } catch (error) {
+      console.error('Failed to refresh user:', error);
+      setUser(null);
     }
-    setIsLoading(false);
+  };
+
+  useEffect(() => {
+    const initAuth = async () => {
+      setIsLoading(true);
+      await refreshUser();
+      setIsLoading(false);
+    };
+
+    initAuth();
   }, []);
 
   const login = async (email: string, password: string) => {
     setIsLoading(true);
+
     try {
-      // Simulate network delay
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ email, password }),
+      });
 
-      // Check credentials
-      const credentialKey = Object.keys(DEMO_CREDENTIALS).find(
-        (key) => key === email && DEMO_CREDENTIALS[key as keyof typeof DEMO_CREDENTIALS] === password
-      );
+      const data = await response.json();
 
-      if (credentialKey) {
-        const userKey = email.split('@')[0] as keyof typeof mockUsers;
-        const userData = mockUsers[userKey];
-
-        if (userData) {
-          setUser(userData);
-          localStorage.setItem('currentUser', JSON.stringify(userData));
-          return;
-        }
+      if (!response.ok) {
+        throw new Error(data.message || 'Login failed');
       }
 
-      throw new Error('Invalid credentials');
+      await refreshUser();
+    } catch (error: any) {
+      throw new Error(error?.message || 'Login failed');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const logout = () => {
-    setUser(null);
-    localStorage.removeItem('currentUser');
+  const logout = async () => {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch (error) {
+      console.error('Logout failed:', error);
+    } finally {
+      setUser(null);
+      window.location.href = '/';
+    }
   };
 
-  const checkPermission = (requiredRole: UserRole): boolean => {
+  const checkPermission = (requiredRole: UserRole) => {
     if (!user) return false;
 
     const roleHierarchy: Record<UserRole, number> = {
-      admin: 4,
-      manager: 3,
-      operator: 2,
-      viewer: 1,
+      ADMIN: 2,
+      USER: 1,
     };
 
     return roleHierarchy[user.role] >= roleHierarchy[requiredRole];
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout, checkPermission }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        isLoading,
+        login,
+        logout,
+        refreshUser,
+        checkPermission,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
@@ -85,8 +127,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (context === undefined) {
+
+  if (!context) {
     throw new Error('useAuth must be used within AuthProvider');
   }
+
   return context;
 }

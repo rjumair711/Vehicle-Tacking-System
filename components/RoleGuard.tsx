@@ -1,53 +1,32 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/authContext';
-import { UserRole } from '@/types';
-import { useEffect } from 'react';
+
+type UserRole = 'ADMIN' | 'USER';
 
 interface RoleGuardProps {
+  allowedRoles: UserRole[];
   children: React.ReactNode;
-  requiredRole?: UserRole | UserRole[];
+  fallback?: React.ReactNode;
 }
 
-export function RoleGuard({ children, requiredRole = 'viewer' }: RoleGuardProps) {
+export default function RoleGuard({
+  allowedRoles,
+  children,
+  fallback = null,
+}: RoleGuardProps) {
   const { user, isLoading } = useAuth();
-  const router = useRouter();
 
-  useEffect(() => {
-    if (isLoading) return;
+  if (isLoading) {
+    return null;
+  }
 
-    if (!user) {
-      router.push('/');
-      return;
-    }
+  if (!user) {
+    return <>{fallback}</>;
+  }
 
-    if (requiredRole) {
-      const roles = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
-      const roleHierarchy: Record<UserRole, number> = {
-        viewer: 1,
-        operator: 2,
-        manager: 3,
-        admin: 4,
-      };
-
-      const hasAccess = roles.some((role) => roleHierarchy[user.role] >= roleHierarchy[role]);
-
-      if (!hasAccess) {
-        router.push('/dashboard');
-      }
-    }
-  }, [user, isLoading, router, requiredRole]);
-
-  if (isLoading || !user) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-center">
-          <div className="mb-4 h-12 w-12 animate-spin rounded-full border-4 border-primary border-t-transparent mx-auto"></div>
-          <p className="text-foreground">Loading...</p>
-        </div>
-      </div>
-    );
+  if (!allowedRoles.includes(user.role)) {
+    return <>{fallback}</>;
   }
 
   return <>{children}</>;

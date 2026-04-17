@@ -1,5 +1,5 @@
 // Role-based access control
-export type UserRole = 'admin' | 'manager' | 'operator' | 'viewer';
+export type UserRole = 'admin' | 'viewer';
 
 // User interface
 export interface User {
@@ -9,6 +9,18 @@ export interface User {
   role: UserRole;
   company: string;
   avatar?: string;
+}
+
+// Customer management
+export interface Customer {
+  id: string;
+  name: string;
+  email: string;
+  company: string;
+  phone?: string;
+  status: 'active' | 'inactive';
+  assignedVehicleIds: string[];
+  createdAt: Date;
 }
 
 // Vehicle status
@@ -38,6 +50,7 @@ export interface Vehicle {
   driver?: string;
   deviceId: string;
   companyId: string;
+  customerId?: string;
 }
 
 // Trip history
@@ -81,7 +94,7 @@ export interface Geofence {
   name: string;
   description?: string;
   center: Location;
-  radius: number; // in meters
+  radius: number;
   type: 'inclusion' | 'exclusion';
   color: string;
   alertOnEnter: boolean;
@@ -101,6 +114,7 @@ export interface TrackingDevice {
   lastPing: Date;
   signalStrength: number;
   simCard?: string;
+  customerId?: string;
 }
 
 // Auth context
@@ -108,6 +122,7 @@ export interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
+  refreshUser?: () => Promise<void>;
   checkPermission: (requiredRole: UserRole) => boolean;
 }

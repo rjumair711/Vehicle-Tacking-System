@@ -1,4 +1,12 @@
-import { User, Vehicle, Trip, Alert, Geofence, TrackingDevice } from '@/types';
+import {
+  User,
+  Vehicle,
+  Trip,
+  Alert,
+  Geofence,
+  TrackingDevice,
+  Customer,
+} from '@/types';
 
 // Mock users with different roles
 export const mockUsers: Record<string, User> = {
@@ -10,22 +18,6 @@ export const mockUsers: Record<string, User> = {
     company: 'FleetCo',
     avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=admin',
   },
-  manager: {
-    id: 'manager-001',
-    email: 'manager@fleettrack.com',
-    name: 'Sarah Williams',
-    role: 'manager',
-    company: 'FleetCo',
-    avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=manager',
-  },
-  operator: {
-    id: 'operator-001',
-    email: 'operator@fleettrack.com',
-    name: 'Mike Chen',
-    role: 'operator',
-    company: 'FleetCo',
-    avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=operator',
-  },
   viewer: {
     id: 'viewer-001',
     email: 'viewer@fleettrack.com',
@@ -36,14 +28,51 @@ export const mockUsers: Record<string, User> = {
   },
 };
 
-// Central coordinates for simulation (San Francisco area)
-const centerLat = 33.6844;   // Islamabad
-const centerLng = 73.0479;   // Islamabad
+// Mock customers
+export const generateMockCustomers = (): Customer[] => {
+  return [
+    {
+      id: 'customer-001',
+      name: 'Ahmed Raza',
+      email: 'ahmed@alpha.com',
+      company: 'Alpha Logistics',
+      phone: '+92 300 1111111',
+      status: 'active',
+      assignedVehicleIds: ['vehicle-1', 'vehicle-2'],
+      createdAt: new Date('2026-01-10'),
+    },
+    {
+      id: 'customer-002',
+      name: 'Sara Khan',
+      email: 'sara@swiftcargo.com',
+      company: 'Swift Cargo',
+      phone: '+92 300 2222222',
+      status: 'active',
+      assignedVehicleIds: ['vehicle-3'],
+      createdAt: new Date('2026-01-18'),
+    },
+    {
+      id: 'customer-003',
+      name: 'Usman Ali',
+      email: 'usman@roadline.com',
+      company: 'RoadLine Transport',
+      phone: '+92 300 3333333',
+      status: 'inactive',
+      assignedVehicleIds: ['vehicle-4'],
+      createdAt: new Date('2026-02-01'),
+    },
+  ];
+};
+
+// Central coordinates for simulation
+const centerLat = 33.6844;
+const centerLng = 73.0479;
 const radiusKm = 15;
 
 function getRandomLocation() {
   const randomAngle = Math.random() * Math.PI * 2;
-  const randomRadius = Math.random() * radiusKm / 111; // Rough conversion to lat/lng
+  const randomRadius = (Math.random() * radiusKm) / 111;
+
   return {
     lat: centerLat + randomRadius * Math.cos(randomAngle),
     lng: centerLng + randomRadius * Math.sin(randomAngle),
@@ -70,8 +99,18 @@ export const generateMockVehicles = (): Vehicle[] => {
     'parked',
   ];
 
+  const customerMap = [
+    'customer-001',
+    'customer-001',
+    'customer-002',
+    'customer-003',
+    undefined,
+    undefined,
+  ];
+
   names.forEach((name, index) => {
     const location = getRandomLocation();
+
     vehicles.push({
       id: `vehicle-${index + 1}`,
       name,
@@ -89,9 +128,17 @@ export const generateMockVehicles = (): Vehicle[] => {
       totalDistance: Math.floor(Math.random() * 50000),
       fuelLevel: Math.random() * 100,
       lastUpdate: new Date(Date.now() - Math.random() * 60000),
-      driver: ['John Driver', 'Jane Operator', 'Bob Smith', 'Alice Cooper', 'Charlie Brown', 'David Lee'][index],
+      driver: [
+        'John Driver',
+        'Jane Operator',
+        'Bob Smith',
+        'Alice Cooper',
+        'Charlie Brown',
+        'David Lee',
+      ][index],
       deviceId: `device-${index + 1}`,
       companyId: 'company-001',
+      customerId: customerMap[index],
     });
   });
 
@@ -128,7 +175,7 @@ export const generateMockTrips = (): Trip[] => {
       startTime,
       endTime: i < 3 ? undefined : endTime,
       distance,
-      duration: Math.floor(duration / 60000), // in minutes
+      duration: Math.floor(duration / 60000),
       averageSpeed: avgSpeed,
       maxSpeed: avgSpeed + Math.floor(Math.random() * 40),
       status: i < 3 ? 'active' : 'completed',
@@ -149,6 +196,7 @@ export const generateMockAlerts = (): Alert[] => {
     'maintenance',
     'offline',
   ];
+
   const messages: Record<string, string> = {
     speeding: 'Vehicle exceeding speed limit',
     geofence: 'Vehicle entered restricted zone',
@@ -161,14 +209,24 @@ export const generateMockAlerts = (): Alert[] => {
     alerts.push({
       id: `alert-${index + 1}`,
       vehicleId: `vehicle-${(index % 6) + 1}`,
-      vehicleName: [`Tesla Model S - #001`, `Ford Transit - #002`, `Volvo FH - #003`, `Nissan Leaf - #004`, `Mercedes Sprinter - #005`, `Chevrolet Bolt - #006`][index % 6],
+      vehicleName: [
+        'Tesla Model S - #001',
+        'Ford Transit - #002',
+        'Volvo FH - #003',
+        'Nissan Leaf - #004',
+        'Mercedes Sprinter - #005',
+        'Chevrolet Bolt - #006',
+      ][index % 6],
       type,
       priority: ['critical', 'high', 'medium', 'medium', 'low'][index] as any,
       message: messages[type],
       timestamp: new Date(Date.now() - Math.random() * 3600000),
       location: getRandomLocation() as any,
       isResolved: Math.random() > 0.5,
-      resolvedAt: Math.random() > 0.5 ? new Date(Date.now() - Math.random() * 1800000) : undefined,
+      resolvedAt:
+        Math.random() > 0.5
+          ? new Date(Date.now() - Math.random() * 1800000)
+          : undefined,
       resolvedBy: Math.random() > 0.5 ? 'admin@fleettrack.com' : undefined,
     });
   });
@@ -183,7 +241,11 @@ export const generateMockGeofences = (): Geofence[] => {
       id: 'geo-1',
       name: 'Downtown Office',
       description: 'Main office location',
-      center: { lat: 37.7749, lng: -122.4194 },
+      center: {
+        lat: 37.7749,
+        lng: -122.4194,
+        timestamp: new Date(),
+      },
       radius: 500,
       type: 'inclusion',
       color: '#3b82f6',
@@ -195,7 +257,11 @@ export const generateMockGeofences = (): Geofence[] => {
     {
       id: 'geo-2',
       name: 'Restricted Area',
-      center: { lat: 37.785, lng: -122.41 },
+      center: {
+        lat: 37.785,
+        lng: -122.41,
+        timestamp: new Date(),
+      },
       radius: 300,
       type: 'exclusion',
       color: '#ef4444',
@@ -207,7 +273,11 @@ export const generateMockGeofences = (): Geofence[] => {
     {
       id: 'geo-3',
       name: 'Warehouse Zone',
-      center: { lat: 37.77, lng: -122.42 },
+      center: {
+        lat: 37.77,
+        lng: -122.42,
+        timestamp: new Date(),
+      },
       radius: 400,
       type: 'inclusion',
       color: '#8b5cf6',
@@ -232,6 +302,7 @@ export const generateMockDevices = (): TrackingDevice[] => {
       lastPing: new Date(Date.now() - 30000),
       signalStrength: -65,
       simCard: 'SIM001',
+      customerId: 'customer-001',
     },
     {
       id: 'device-2',
@@ -243,6 +314,7 @@ export const generateMockDevices = (): TrackingDevice[] => {
       lastPing: new Date(Date.now() - 45000),
       signalStrength: -72,
       simCard: 'SIM002',
+      customerId: 'customer-001',
     },
     {
       id: 'device-3',
@@ -254,6 +326,7 @@ export const generateMockDevices = (): TrackingDevice[] => {
       lastPing: new Date(Date.now() - 3600000),
       signalStrength: -95,
       simCard: 'SIM003',
+      customerId: 'customer-002',
     },
     {
       id: 'device-4',
@@ -265,6 +338,7 @@ export const generateMockDevices = (): TrackingDevice[] => {
       lastPing: new Date(Date.now() - 60000),
       signalStrength: -60,
       simCard: 'SIM004',
+      customerId: 'customer-003',
     },
     {
       id: 'device-5',

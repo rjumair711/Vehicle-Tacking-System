@@ -3,18 +3,49 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/authContext';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Bell, Lock, Palette, User, LogOut, MapPin, Gauge, AlertTriangle } from 'lucide-react';
+import {
+  Bell,
+  Lock,
+  Palette,
+  User,
+  LogOut,
+  MapPin,
+  Gauge,
+  AlertTriangle,
+} from 'lucide-react';
+
+type NotificationSettings = {
+  emailAlerts: boolean;
+  speedingAlerts: boolean;
+  geofenceAlerts: boolean;
+  maintenanceAlerts: boolean;
+  offlineAlerts: boolean;
+};
+
+type DisplaySettings = {
+  theme: string;
+  speedUnit: string;
+  temperatureUnit: string;
+};
 
 export default function SettingsPage() {
   const router = useRouter();
   const { user, logout, isLoading } = useAuth();
+
   const [activeTab, setActiveTab] = useState('account');
-  const [notificationSettings, setNotificationSettings] = useState({
+
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>({
     emailAlerts: true,
     speedingAlerts: true,
     geofenceAlerts: true,
@@ -22,10 +53,24 @@ export default function SettingsPage() {
     offlineAlerts: true,
   });
 
-  const [displaySettings, setDisplaySettings] = useState({
+  const [displaySettings, setDisplaySettings] = useState<DisplaySettings>({
     theme: 'dark',
     speedUnit: 'km/h',
     temperatureUnit: 'C',
+  });
+
+  const [pageLoading, setPageLoading] = useState(true);
+  const [savingNotifications, setSavingNotifications] = useState(false);
+  const [savingDisplay, setSavingDisplay] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
+
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
   });
 
   useEffect(() => {
@@ -34,12 +79,168 @@ export default function SettingsPage() {
     }
   }, [isLoading, user, router]);
 
-  if (isLoading || !user) return null;
+  useEffect(() => {
+    if (user) {
+      fetchSettings();
+    }
+  }, [user]);
 
-  const handleLogout = () => {
-    logout();
+  const fetchSettings = async () => {
+    try {
+      setPageLoading(true);
+      setError('');
+
+      const res = await fetch('/api/settings', {
+        method: 'GET',
+        credentials: 'include',
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || 'Failed to load settings');
+      }
+
+      setNotificationSettings({
+        emailAlerts: data.emailAlerts,
+        speedingAlerts: data.speedingAlerts,
+        geofenceAlerts: data.geofenceAlerts,
+        maintenanceAlerts: data.maintenanceAlerts,
+        offlineAlerts: data.offlineAlerts,
+      });
+
+      setDisplaySettings({
+        theme: data.theme,
+        speedUnit: data.speedUnit,
+        temperatureUnit: data.temperatureUnit,
+      });
+    } catch (err: any) {
+      setError(err.message || 'Failed to load settings');
+    } finally {
+      setPageLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await logout();
     router.push('/');
   };
+
+  const saveNotificationSettings = async () => {
+    try {
+      setSavingNotifications(true);
+      setError('');
+      setMessage('');
+
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          ...notificationSettings,
+          ...displaySettings,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || 'Failed to save notification settings');
+      }
+
+      setMessage('Notification settings saved successfully');
+    } catch (err: any) {
+      setError(err.message || 'Failed to save notification settings');
+    } finally {
+      setSavingNotifications(false);
+    }
+  };
+
+  const saveDisplaySettings = async () => {
+    try {
+      setSavingDisplay(true);
+      setError('');
+      setMessage('');
+
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          ...notificationSettings,
+          ...displaySettings,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || 'Failed to save display settings');
+      }
+
+      setMessage('Display settings saved successfully');
+    } catch (err: any) {
+      setError(err.message || 'Failed to save display settings');
+    } finally {
+      setSavingDisplay(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    try {
+      setError('');
+      setMessage('');
+
+      if (
+        !passwordForm.currentPassword ||
+        !passwordForm.newPassword ||
+        !passwordForm.confirmPassword
+      ) {
+        throw new Error('Please fill all password fields');
+      }
+
+      if (passwordForm.newPassword.length < 6) {
+        throw new Error('New password must be at least 6 characters');
+      }
+
+      if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+        throw new Error('New password and confirm password do not match');
+      }
+
+      setChangingPassword(true);
+
+      const res = await fetch('/api/settings/password', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          currentPassword: passwordForm.currentPassword,
+          newPassword: passwordForm.newPassword,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || 'Failed to update password');
+      }
+
+      setMessage('Password updated successfully');
+      setPasswordForm({
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: '',
+      });
+    } catch (err: any) {
+      setError(err.message || 'Failed to update password');
+    } finally {
+      setChangingPassword(false);
+    }
+  };
+
+  if (isLoading || !user || pageLoading) {
+    return <div className="p-6">Loading settings...</div>;
+  }
 
   const tabs = [
     { id: 'account', label: 'Account', icon: <User className="h-4 w-4" /> },
@@ -55,7 +256,18 @@ export default function SettingsPage() {
         <p className="mt-2 text-muted-foreground">Manage your account and preferences</p>
       </div>
 
-      {/* Tabs */}
+      {message && (
+        <Alert>
+          <AlertDescription>{message}</AlertDescription>
+        </Alert>
+      )}
+
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
       <div className="flex flex-wrap gap-2 border-b border-border pb-4">
         {tabs.map((tab) => (
           <button
@@ -73,13 +285,12 @@ export default function SettingsPage() {
         ))}
       </div>
 
-      {/* Account Settings */}
       {activeTab === 'account' && (
         <div className="space-y-4">
           <Card className="border-border bg-card">
             <CardHeader>
               <CardTitle>Profile Information</CardTitle>
-              <CardDescription>View and manage your account details</CardDescription>
+              <CardDescription>View your account details</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
@@ -94,7 +305,7 @@ export default function SettingsPage() {
 
               <div>
                 <label className="text-sm font-medium text-foreground">Company</label>
-                <Input value={user.company} readOnly className="mt-1 bg-muted" />
+                <Input value={user.company || ''} readOnly className="mt-1 bg-muted" />
               </div>
 
               <div>
@@ -102,10 +313,8 @@ export default function SettingsPage() {
                 <div className="mt-1 flex items-center gap-2">
                   <Badge variant="default">{user.role.toUpperCase()}</Badge>
                   <span className="text-xs text-muted-foreground">
-                    {user.role === 'admin' && 'Full system access'}
-                    {user.role === 'manager' && 'Management and reporting access'}
-                    {user.role === 'operator' && 'Operation and tracking access'}
-                    {user.role === 'viewer' && 'View-only access'}
+                    {user.role === 'ADMIN' && 'Full system access'}
+                    {user.role === 'USER' && 'Customer access'}
                   </span>
                 </div>
               </div>
@@ -118,7 +327,7 @@ export default function SettingsPage() {
             </CardHeader>
             <CardContent>
               <p className="text-sm text-muted-foreground mb-4">
-                Logging out will end your current session
+                Logging out will end your current session.
               </p>
               <Button
                 onClick={handleLogout}
@@ -132,7 +341,6 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Notification Settings */}
       {activeTab === 'notifications' && (
         <div className="space-y-4">
           <Card className="border-border bg-card">
@@ -173,7 +381,10 @@ export default function SettingsPage() {
                   icon: <Bell className="h-4 w-4" />,
                 },
               ].map((setting) => (
-                <div key={setting.id} className="flex items-start justify-between rounded-lg border border-border p-3">
+                <div
+                  key={setting.id}
+                  className="flex items-start justify-between rounded-lg border border-border p-3"
+                >
                   <div className="flex items-start gap-3 flex-1">
                     <div className="mt-0.5 text-primary">{setting.icon}</div>
                     <div>
@@ -181,35 +392,35 @@ export default function SettingsPage() {
                       <p className="text-xs text-muted-foreground">{setting.description}</p>
                     </div>
                   </div>
-                  <label className="flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={notificationSettings[setting.id as keyof typeof notificationSettings]}
-                      onChange={(e) =>
-                        setNotificationSettings({
-                          ...notificationSettings,
-                          [setting.id]: e.target.checked,
-                        })
-                      }
-                      className="rounded border-border"
-                    />
-                  </label>
+
+                  <input
+                    type="checkbox"
+                    checked={notificationSettings[setting.id as keyof NotificationSettings]}
+                    onChange={(e) =>
+                      setNotificationSettings((prev) => ({
+                        ...prev,
+                        [setting.id]: e.target.checked,
+                      }))
+                    }
+                    className="h-4 w-4"
+                  />
                 </div>
               ))}
             </CardContent>
           </Card>
 
-          <Button className="w-full">Save Notification Settings</Button>
+          <Button className="w-full" onClick={saveNotificationSettings} disabled={savingNotifications}>
+            {savingNotifications ? 'Saving...' : 'Save Notification Settings'}
+          </Button>
         </div>
       )}
 
-      {/* Display Settings */}
       {activeTab === 'display' && (
         <div className="space-y-4">
           <Card className="border-border bg-card">
             <CardHeader>
               <CardTitle>Display Preferences</CardTitle>
-              <CardDescription>Customize how the dashboard looks and behaves</CardDescription>
+              <CardDescription>Customize dashboard behavior</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
@@ -217,7 +428,7 @@ export default function SettingsPage() {
                 <select
                   value={displaySettings.theme}
                   onChange={(e) =>
-                    setDisplaySettings({ ...displaySettings, theme: e.target.value })
+                    setDisplaySettings((prev) => ({ ...prev, theme: e.target.value }))
                   }
                   className="mt-1 w-full rounded-lg border border-border bg-input px-3 py-2 text-foreground"
                 >
@@ -232,7 +443,7 @@ export default function SettingsPage() {
                 <select
                   value={displaySettings.speedUnit}
                   onChange={(e) =>
-                    setDisplaySettings({ ...displaySettings, speedUnit: e.target.value })
+                    setDisplaySettings((prev) => ({ ...prev, speedUnit: e.target.value }))
                   }
                   className="mt-1 w-full rounded-lg border border-border bg-input px-3 py-2 text-foreground"
                 >
@@ -247,7 +458,10 @@ export default function SettingsPage() {
                 <select
                   value={displaySettings.temperatureUnit}
                   onChange={(e) =>
-                    setDisplaySettings({ ...displaySettings, temperatureUnit: e.target.value })
+                    setDisplaySettings((prev) => ({
+                      ...prev,
+                      temperatureUnit: e.target.value,
+                    }))
                   }
                   className="mt-1 w-full rounded-lg border border-border bg-input px-3 py-2 text-foreground"
                 >
@@ -258,11 +472,12 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          <Button className="w-full">Save Display Settings</Button>
+          <Button className="w-full" onClick={saveDisplaySettings} disabled={savingDisplay}>
+            {savingDisplay ? 'Saving...' : 'Save Display Settings'}
+          </Button>
         </div>
       )}
 
-      {/* Security Settings */}
       {activeTab === 'security' && (
         <div className="space-y-4">
           <Card className="border-border bg-card">
@@ -271,30 +486,68 @@ export default function SettingsPage() {
               <CardDescription>Manage your account security</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Alert>
-                <AlertTriangle className="h-4 w-4" />
-                <AlertDescription>
-                  Your account is currently using demo authentication. To enable full security features, please
-                  set up two-factor authentication.
-                </AlertDescription>
-              </Alert>
+              <div className="rounded-lg border border-border p-4 space-y-3">
+                <h3 className="font-semibold text-foreground">Change Password</h3>
 
-              <div className="rounded-lg border border-border p-4">
-                <h3 className="font-semibold text-foreground mb-2">Password</h3>
-                <p className="text-sm text-muted-foreground mb-3">Last changed 3 months ago</p>
-                <Button variant="outline">Change Password</Button>
+                <Input
+                  type="password"
+                  placeholder="Current password"
+                  value={passwordForm.currentPassword}
+                  onChange={(e) =>
+                    setPasswordForm((prev) => ({
+                      ...prev,
+                      currentPassword: e.target.value,
+                    }))
+                  }
+                />
+
+                <Input
+                  type="password"
+                  placeholder="New password"
+                  value={passwordForm.newPassword}
+                  onChange={(e) =>
+                    setPasswordForm((prev) => ({
+                      ...prev,
+                      newPassword: e.target.value,
+                    }))
+                  }
+                />
+
+                <Input
+                  type="password"
+                  placeholder="Confirm new password"
+                  value={passwordForm.confirmPassword}
+                  onChange={(e) =>
+                    setPasswordForm((prev) => ({
+                      ...prev,
+                      confirmPassword: e.target.value,
+                    }))
+                  }
+                />
+
+                <Button variant="outline" onClick={handleChangePassword} disabled={changingPassword}>
+                  {changingPassword ? 'Updating...' : 'Change Password'}
+                </Button>
               </div>
 
               <div className="rounded-lg border border-border p-4">
                 <h3 className="font-semibold text-foreground mb-2">Two-Factor Authentication</h3>
-                <p className="text-sm text-muted-foreground mb-3">Add an extra layer of security to your account</p>
-                <Button variant="outline">Enable 2FA</Button>
+                <p className="text-sm text-muted-foreground mb-3">
+                  This feature is not implemented yet.
+                </p>
+                <Button variant="outline" disabled>
+                  Enable 2FA
+                </Button>
               </div>
 
               <div className="rounded-lg border border-border p-4">
                 <h3 className="font-semibold text-foreground mb-2">Active Sessions</h3>
-                <p className="text-sm text-muted-foreground mb-3">Current device: Browser on {new Date().toLocaleDateString()}</p>
-                <Button variant="outline">View All Sessions</Button>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Session management is not implemented yet.
+                </p>
+                <Button variant="outline" disabled>
+                  View All Sessions
+                </Button>
               </div>
             </CardContent>
           </Card>

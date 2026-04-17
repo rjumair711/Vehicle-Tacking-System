@@ -1,210 +1,301 @@
 # FleetTrack Pro - GPS Vehicle Tracking System
 
-A professional, real-time GPS vehicle tracking and fleet management platform built with Next.js 16, React, TypeScript, and Tailwind CSS.
+A professional GPS vehicle tracking and fleet management platform built with **Next.js, TypeScript, Prisma, and PostgreSQL**.
 
-## Features
+---
 
-### Core Functionality
-- **Live Map Tracking**: Real-time vehicle location visualization with interactive map
-- **Trip Management**: Complete trip history with distance, duration, and speed analytics
-- **Alert System**: Multi-priority alerts for speeding, geofence violations, offline status, and maintenance
-- **Geofence Management**: Create and manage virtual boundaries with entry/exit alerts
-- **Device Management**: Monitor GPS device status, battery levels, and signal strength
-- **Role-Based Access Control**: 4 user roles (Admin, Manager, Operator, Viewer) with permission-based features
+## 🚀 Current System Status
 
-### User Experience
-- **Responsive Design**: Mobile-first design with bottom navigation on phones, desktop sidebar on larger screens
-- **Dark SaaS Theme**: Professional dark theme optimized for extended viewing
-- **Interactive Maps**: Canvas-based vehicle mapping with zoom controls and vehicle selection
-- **Real-Time Simulation**: Live vehicle simulation that continuously updates position, speed, and fuel data
-- **Comprehensive Dashboards**: KPI cards, alerts, fleet status, and analytics
+This project is currently in a **hybrid stage**:
 
-## Demo Accounts
+- ✅ Authentication → **REAL (Database + JWT)**
+- ✅ Customers → **REAL (stored in DB)**
+- ⚠️ Vehicles / Devices / Tracking → **Mock (simulation)**
+- ⚠️ Assignments → UI-level (not yet persisted)
 
-### Admin Account
-- **Email**: admin@fleettrack.com
-- **Password**: admin123
-- **Access**: Full system access, device management, all features
+This allows full UI testing while backend integration is gradually implemented.
 
-### Manager Account
-- **Email**: manager@fleettrack.com
-- **Password**: manager123
-- **Access**: Team management, reporting, geofence management
+---
 
-### Operator Account
-- **Email**: operator@fleettrack.com
-- **Password**: operator123
-- **Access**: Live tracking, trip history, alerts
+## 🔐 Authentication System (UPDATED)
 
-### Viewer Account
-- **Email**: viewer@fleettrack.com
-- **Password**: viewer123
-- **Access**: Read-only access to maps and reports
+### Features
+- JWT-based authentication
+- Role-based access control
+- Secure password hashing (bcrypt)
+- Cookie-based session handling
 
-## Technology Stack
+### Roles (Simplified)
+- **ADMIN**
+  - Full system control
+  - Can create customers
+  - Can manage devices
+- **USER**
+  - Customer account
+  - Can log in (future: will see assigned data only)
 
-- **Framework**: Next.js 16 (App Router)
+---
+
+## 👤 Customer Management (NEW)
+
+### Admin can:
+- Create customer accounts from dashboard
+- Assign credentials (email + password)
+- Store customers in database (Prisma)
+
+### Customer can:
+- Log in using assigned credentials
+
+⚠️ Note:
+- Vehicle/device assignment is currently **mock only**
+- Dashboard filtering per customer will be added later
+
+---
+
+## 📊 Core Features
+
+### Fleet Management
+- Live vehicle tracking (simulated)
+- Trip history and analytics
+- Alert monitoring system
+- Geofence management
+- Device management
+
+### Dashboard
+- Active vehicles
+- Active trips
+- Alerts
+- Total distance tracking
+
+---
+
+## 📡 Device Management
+
+- View device status (Active / Error / Inactive)
+- Battery monitoring
+- Signal strength tracking
+- Attach device to vehicle (mock phase)
+
+---
+
+## 🗺️ Live Tracking (Simulation)
+
+- Real-time vehicle movement simulation
+- Speed variation
+- Fuel consumption
+- Status changes (online/offline)
+
+---
+
+## 🧠 Architecture Overview
+
+
+Frontend (Next.js)
+↓
+Auth API (JWT)
+↓
+Prisma ORM
+↓
+PostgreSQL Database
+
+
+---
+
+## 🧩 Data Flow (Current Phase)
+
+
+Admin
+↓
+Creates Customer (DB)
+↓
+Customer Login (REAL)
+↓
+Dashboard (Mock Data)
+
+
+---
+
+## 🛠️ Tech Stack
+
+- **Frontend**: Next.js (App Router)
 - **Language**: TypeScript
-- **Styling**: Tailwind CSS + shadcn/ui components
-- **Icons**: Lucide React
-- **State Management**: React Hooks
-- **Authentication**: Demo localStorage-based auth (for development)
-- **Data**: Mock data generators for realistic simulation
+- **Styling**: Tailwind CSS + shadcn/ui
+- **Backend**: Next.js API Routes
+- **Database**: PostgreSQL
+- **ORM**: Prisma
+- **Auth**: JWT + Cookies
+- **Hashing**: bcryptjs
 
-## Project Structure
+---
 
-```
+## 📁 Project Structure
+
+
 app/
-├── page.tsx                 # Login page
+├── api/
+│ ├── auth/
+│ │ ├── login/
+│ │ ├── logout/
+│ │ └── me/
+│ └── users/
+│ └── route.ts # Create + Fetch users
+│
 ├── dashboard/
-│   ├── page.tsx            # Dashboard home
-│   ├── map/                # Live map tracking
-│   ├── trips/              # Trip history & analytics
-│   ├── alerts/             # Alert management
-│   ├── geofences/          # Geofence management
-│   ├── devices/            # Device management (admin only)
-│   └── settings/           # User settings
-├── layout.tsx              # Root layout with auth provider
-└── globals.css             # Global styles and theme
-
-components/
-├── AppShell.tsx            # Responsive app container
-├── Header.tsx              # Top navigation header
-├── Sidebar.tsx             # Desktop sidebar navigation
-├── BottomNav.tsx           # Mobile bottom navigation
-├── VehicleMap.tsx          # Interactive vehicle map
-├── RoleGuard.tsx           # Role-based access control component
+│ ├── customers/ # Customer management (REAL DB)
+│ ├── devices/ # Device management (mock)
+│ ├── map/
+│ ├── trips/
+│ ├── alerts/
+│ └── page.tsx
+│
+├── page.tsx # Login page
 
 lib/
-├── authContext.tsx         # Authentication context & hooks
-├── mockData.ts             # Mock data generators
-└── utils.ts                # Utility functions
+├── prisma.ts # Prisma client
+├── authContext.tsx # Auth logic
+├── mockData.ts # Simulation data
 
-hooks/
-└── useVehicleSimulation.ts # Vehicle position/data simulation hook
+components/
+├── RoleGuard.tsx
+├── AdminPageGuard.tsx
+├── Sidebar.tsx
 
-types/
-└── index.ts                # TypeScript type definitions
-```
 
-## Key Components
+---
 
-### AppShell
-Responsive container that switches between desktop and mobile layouts based on screen size. Desktop shows a sidebar, mobile shows bottom navigation.
+## 🔑 How Authentication Works
 
-### VehicleMap
-Canvas-based map component that displays vehicles in real-time. Supports:
-- Vehicle position rendering with status indicators
-- Zoom controls
-- Vehicle selection and details panel
-- Heading visualization
-- Legend with status colors
+### Login Flow
 
-### Authentication
-Demo authentication system using localStorage. In production, would integrate with a real auth system (Supabase, Auth.js, etc.).
 
-### Vehicle Simulation
-Real-time vehicle position and data simulation that continuously updates:
-- GPS coordinates with random movement
-- Speed variations
-- Heading/direction changes
-- Fuel level decrements
-- Distance accumulation
-- Status changes
+User → Login Form
+↓
+POST /api/auth/login
+↓
+Verify password (bcrypt)
+↓
+Generate JWT
+↓
+Store in cookie
+↓
+Access dashboard
 
-## Getting Started
 
-### Installation
+---
+
+## 🧪 Testing Credentials
+
+### Admin
+
+Email: admin@example.com
+
+Password: admin123
+
+
+### Customer (Created from dashboard)
+
+Email: (entered by admin)
+Password: 123456 (default for now)
+
+
+---
+
+## ⚠️ Current Limitations
+
+- Vehicle assignment not saved in database
+- Devices are mock-only
+- Customer dashboard not filtered yet
+- No real GPS tracking hardware integration
+
+---
+
+## 🚧 Next Development Phases
+
+### Phase 1 (Completed ✅)
+- Auth system (JWT)
+- Role-based access
+- Customer creation (DB)
+
+### Phase 2 (Completed ✅)
+- Device UI
+- Vehicle assignment UI (mock)
+
+### Phase 3 (Next 🔥)
+- Save vehicle ownership in DB
+- Link user → vehicle
+- Filter dashboard per user
+
+### Phase 4
+- Save device → vehicle in DB
+- Real ownership structure
+
+### Phase 5
+- Integrate real GPS tracker data
+
+---
+
+## 🧠 Final Target Architecture
+
+
+User (DB)
+↓
+Vehicle (DB)
+↓
+Device (DB)
+↓
+Live GPS Data
+
+
+---
+
+## ⚙️ Setup Instructions
 
 ```bash
-# Clone the repository
-git clone <repository-url>
-
-# Install dependencies
 pnpm install
-
-# Run development server
 pnpm dev
-```
+🗄️ Database Setup
+npx prisma migrate dev
+npx prisma generate
+npx prisma db seed
+🚀 Deployment
 
-Visit `http://localhost:3000` to see the application.
+Deploy easily on Vercel:
 
-### Demo Mode
-
-The application comes pre-configured with demo data and mock vehicles that simulate real movement. Simply log in with any demo account to see live tracking in action.
-
-## Configuration
-
-### Theme
-The application uses a professional dark theme by default. Theme colors are defined in:
-- `app/globals.css` - CSS custom properties for colors
-- `tailwind.config.ts` - Tailwind color configuration
-
-### Mock Data
-Mock data generators are in `lib/mockData.ts`. Modify these to customize:
-- Vehicle information
-- User accounts
-- Geofence locations
-- Tracking device data
-
-### Simulation Settings
-Adjust vehicle simulation behavior in `hooks/useVehicleSimulation.ts`:
-- Update interval (currently 2 seconds)
-- Movement distance
-- Speed variation
-- Status change probability
-
-## Permissions & Roles
-
-| Feature | Admin | Manager | Operator | Viewer |
-|---------|-------|---------|----------|--------|
-| Live Map | ✓ | ✓ | ✓ | ✓ |
-| Trips | ✓ | ✓ | ✓ | ✓ |
-| Alerts | ✓ | ✓ | ✓ | ✓ |
-| Geofences | ✓ | ✓ | ✗ | ✗ |
-| Devices | ✓ | ✗ | ✗ | ✗ |
-| Settings | ✓ | ✓ | ✓ | ✓ |
-
-## Browser Support
-
-- Chrome (latest)
-- Firefox (latest)
-- Safari (latest)
-- Edge (latest)
-
-## Performance Notes
-
-- Vehicle simulation updates every 2 seconds
-- Maps use canvas rendering for optimal performance
-- Mock data is generated client-side for instant interaction
-- No external API calls required for demo mode
-
-## Future Enhancements
-
-- Real GPS data integration with actual tracking API
-- Database integration (Supabase, PostgreSQL)
-- Advanced analytics and reporting
-- Machine learning for anomaly detection
-- Push notifications
-- Multi-company/fleet support
-- Custom report generation
-- Driver behavior analytics
-- Fuel consumption optimization
-- Route planning and optimization
-
-## Deployment
-
-This application can be deployed to Vercel with zero configuration. Simply push to GitHub and connect your repository to Vercel.
-
-```bash
-# Deploy to Vercel
 vercel deploy
-```
-
-## Support
-
-For issues or questions, refer to the documentation or open an issue on the repository.
-
-## License
+💡 Notes
+This project is designed for incremental backend integration
+Mock data is used intentionally to simulate real-world behavior
+Architecture is ready for scaling into production
+📜 License
 
 MIT
+
+
+---
+
+# ✅ What I updated (important)
+
+- Removed old **localStorage auth**
+- Removed **4 roles system**
+- Added:
+  - JWT auth
+  - Prisma
+  - PostgreSQL
+  - Customer DB system
+- Explained:
+  - what is real vs mock
+  - future roadmap
+- Made it **professional + project-ready**
+
+---
+
+# 💬 If you want next upgrade
+
+Next logical step is:
+
+👉 **Save vehicle assignment in DB (Phase 3)**
+
+Just say:
+**"start phase 3"** and we’ll make your system fully relational 🚀
+
+User-specific vehicle/device assignment and dashboard filtering will be implemented during real GPS tracker integration.

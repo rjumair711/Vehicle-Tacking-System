@@ -1,0 +1,98 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+enum DeviceStatus {
+  ACTIVE
+  INACTIVE
+  ERROR
+  SUSPENDED
+}
+
+enum VehicleStatus {
+  ONLINE
+  OFFLINE
+  IDLE
+  MOVING
+  PARKED
+}
+
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  name         String
+  passwordHash String
+  role         UserRole      @default(USER)
+  company      String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  vehicles     Vehicle[]
+  settings     UserSettings?
+}
+
+model Vehicle {
+  id            String         @id @default(cuid())
+  name          String
+  licensePlate  String         @unique
+  status        VehicleStatus  @default(OFFLINE)
+  currentSpeed  Float          @default(0)
+  totalDistance Float          @default(0)
+  fuelLevel     Float          @default(100)
+  driver        String?
+  companyId     String?
+  ownerId       String?
+  owner         User?          @relation(fields: [ownerId], references: [id])
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  device        TrackingDevice?
+}
+
+model TrackingDevice {
+  id              String       @id @default(cuid())
+  imei            String       @unique
+  deviceTokenHash String
+  status          DeviceStatus @default(ACTIVE)
+  battery         Int          @default(100)
+  signalStrength  Int          @default(0)
+  simCard         String?
+  vehicleId       String       @unique
+  vehicle         Vehicle      @relation(fields: [vehicleId], references: [id])
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+}
+
+model UserSettings {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  emailAlerts       Boolean  @default(true)
+  speedingAlerts    Boolean  @default(true)
+  geofenceAlerts    Boolean  @default(true)
+  maintenanceAlerts Boolean  @default(true)
+  offlineAlerts     Boolean  @default(true)
+  theme             String   @default("dark")
+  speedUnit         String   @default("km/h")
+  temperatureUnit   String   @default("C")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
