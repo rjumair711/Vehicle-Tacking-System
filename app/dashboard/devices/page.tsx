@@ -436,7 +436,7 @@ export default function DevicesPage() {
             }
           }}
         >
-          <SheetContent side="right" className="w-full sm:max-w-lg">
+          <SheetContent side="right" className="w-full sm:max-w-lg px-6">
             <SheetHeader>
               <SheetTitle>Add Device</SheetTitle>
               <SheetDescription>
