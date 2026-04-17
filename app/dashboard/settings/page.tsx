@@ -24,6 +24,7 @@ import {
   Gauge,
   AlertTriangle,
 } from 'lucide-react';
+import { useTheme } from 'next-themes';
 
 type NotificationSettings = {
   emailAlerts: boolean;
@@ -39,10 +40,12 @@ type DisplaySettings = {
   temperatureUnit: string;
 };
 
+
+
 export default function SettingsPage() {
   const router = useRouter();
   const { user, logout, isLoading } = useAuth();
-
+  const { setTheme } = useTheme();
   const [activeTab, setActiveTab] = useState('account');
 
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>({
@@ -73,6 +76,7 @@ export default function SettingsPage() {
     confirmPassword: '',
   });
 
+
   useEffect(() => {
     if (!isLoading && !user) {
       router.push('/');
@@ -89,6 +93,7 @@ export default function SettingsPage() {
     try {
       setPageLoading(true);
       setError('');
+      setMessage('');
 
       const res = await fetch('/api/settings', {
         method: 'GET',
@@ -101,19 +106,23 @@ export default function SettingsPage() {
         throw new Error(data.message || 'Failed to load settings');
       }
 
-      setNotificationSettings({
+      const loadedNotificationSettings = {
         emailAlerts: data.emailAlerts,
         speedingAlerts: data.speedingAlerts,
         geofenceAlerts: data.geofenceAlerts,
         maintenanceAlerts: data.maintenanceAlerts,
         offlineAlerts: data.offlineAlerts,
-      });
+      };
 
-      setDisplaySettings({
+      const loadedDisplaySettings = {
         theme: data.theme,
         speedUnit: data.speedUnit,
         temperatureUnit: data.temperatureUnit,
-      });
+      };
+
+      setNotificationSettings(loadedNotificationSettings);
+      setDisplaySettings(loadedDisplaySettings);
+      setTheme(data.theme);
     } catch (err: any) {
       setError(err.message || 'Failed to load settings');
     } finally {
@@ -178,6 +187,7 @@ export default function SettingsPage() {
         throw new Error(data.message || 'Failed to save display settings');
       }
 
+      setTheme(displaySettings.theme);
       setMessage('Display settings saved successfully');
     } catch (err: any) {
       setError(err.message || 'Failed to save display settings');
@@ -273,11 +283,10 @@ export default function SettingsPage() {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors rounded-lg ${
-              activeTab === tab.id
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
+            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors rounded-lg ${activeTab === tab.id
+              ? 'bg-primary text-primary-foreground'
+              : 'text-muted-foreground hover:text-foreground'
+              }`}
           >
             {tab.icon}
             {tab.label}
@@ -409,7 +418,11 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          <Button className="w-full" onClick={saveNotificationSettings} disabled={savingNotifications}>
+          <Button
+            className="w-full"
+            onClick={saveNotificationSettings}
+            disabled={savingNotifications}
+          >
             {savingNotifications ? 'Saving...' : 'Save Notification Settings'}
           </Button>
         </div>
@@ -427,14 +440,16 @@ export default function SettingsPage() {
                 <label className="text-sm font-medium text-foreground">Theme</label>
                 <select
                   value={displaySettings.theme}
-                  onChange={(e) =>
-                    setDisplaySettings((prev) => ({ ...prev, theme: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    const newTheme = e.target.value;
+                    setDisplaySettings((prev) => ({ ...prev, theme: newTheme }));
+                    setTheme(newTheme);
+                  }}
                   className="mt-1 w-full rounded-lg border border-border bg-input px-3 py-2 text-foreground"
                 >
                   <option value="light">Light</option>
                   <option value="dark">Dark</option>
-                  <option value="auto">Auto (System)</option>
+                  <option value="system">Auto (System)</option>
                 </select>
               </div>
 
@@ -525,7 +540,11 @@ export default function SettingsPage() {
                   }
                 />
 
-                <Button variant="outline" onClick={handleChangePassword} disabled={changingPassword}>
+                <Button
+                  variant="outline"
+                  onClick={handleChangePassword}
+                  disabled={changingPassword}
+                >
                   {changingPassword ? 'Updating...' : 'Change Password'}
                 </Button>
               </div>
