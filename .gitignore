@@ -1,11 +1,16 @@
-# v0 runtime files
-__v0_runtime_loader.js
-__v0_devtools.tsx
-__v0_jsx-dev-runtime.ts
-
-# Common ignores
-node_modules/
-.next/
+# Environment variables
+.env
+.env.*
 .env*.local
-.DS_Store
+
+# Node
+node_modules/
+
+# Next.js
+.next/
+
+# Prisma
 /lib/generated/prisma
+
+# OS
+.DS_Store

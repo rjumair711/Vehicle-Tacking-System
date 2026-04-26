@@ -265,65 +265,74 @@ export default function CustomersPage() {
             );
 
             return (
-              <Card key={customer.id}>
-                <CardContent className="p-5 flex justify-between">
-                  {/* Left */}
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <Building2 className="h-4 w-4" />
-                      <h2 className="font-semibold">{customer.company}</h2>
-                      <Badge>{customer.status}</Badge>
-                    </div>
+              <Card key={customer.id} className="rounded-2xl">
+  <CardContent className="flex flex-col gap-5 p-6 md:flex-row md:items-start md:justify-between">
+    {/* Left */}
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Building2 className="h-4 w-4 text-muted-foreground" />
+        <h2 className="text-lg font-semibold leading-none">
+          {customer.company}
+        </h2>
+        <Badge className="px-3 py-1 text-xs">
+          {customer.status}
+        </Badge>
+      </div>
 
-                    <p>{customer.name}</p>
+      <p className="text-sm font-medium">
+        {customer.name}
+      </p>
 
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Mail className="h-4 w-4" />
-                      {customer.email}
-                    </div>
-                  </div>
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Mail className="h-4 w-4" />
+        <span>{customer.email}</span>
+      </div>
+    </div>
 
-                  {/* Right */}
-                  <div className="w-[250px]">
-                    <Button
-                      size="sm"
-                      className="w-full mb-3"
-                      onClick={() => {
-                        setSelectedCustomer(customer);
-                        setIsAssignOpen(true);
-                      }}
-                    >
-                      Assign Tracker
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      className="w-full"
-                      onClick={() => handleDeleteCustomer(customer.id)}
-                    >
-                      Delete Customer
-                    </Button>
+    {/* Right */}
+    <div className="flex w-full flex-col gap-3 md:w-[280px]">
+      <Button
+        size="sm"
+        className="w-full"
+        onClick={() => {
+          setSelectedCustomer(customer);
+          setIsAssignOpen(true);
+        }}
+      >
+        Assign Tracker
+      </Button>
 
-                    {assignedTrackers.length > 0 ? (
-                      assignedTrackers.map((tracker) => (
-                        <div
-                          key={tracker.trackerId}
-                          className="text-sm border p-2 mb-2 rounded"
-                        >
-                          <p>{tracker.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {tracker.licensePlate}
-                          </p>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-sm text-muted-foreground">
-                        No Trackers
-                      </p>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
+      <Button
+        size="sm"
+        variant="destructive"
+        className="w-full"
+        onClick={() => handleDeleteCustomer(customer.id)}
+      >
+        Delete Customer
+      </Button>
+
+      <div className="mt-1 space-y-2">
+        {assignedTrackers.length > 0 ? (
+          assignedTrackers.map((tracker) => (
+            <div
+              key={tracker.trackerId}
+              className="rounded-lg border bg-muted/30 p-3 text-sm"
+            >
+              <p className="font-medium">{tracker.name}</p>
+              <p className="text-xs text-muted-foreground">
+                {tracker.licensePlate}
+              </p>
+            </div>
+          ))
+        ) : (
+          <p className="pt-1 text-sm text-muted-foreground">
+            No Trackers
+          </p>
+        )}
+      </div>
+    </div>
+  </CardContent>
+</Card>
             );
           })}
         </div>
