@@ -17,13 +17,11 @@ export async function GET() {
         };
 
         const user = await prisma.user.findUnique({
-            where: { id: decoded.userId },
+            where: { userId: Number(decoded.userId) },
             select: {
-                id: true,
+                userId: true,
+                username: true,
                 email: true,
-                name: true,
-                role: true,
-                company: true,
             },
         });
 
@@ -31,7 +29,14 @@ export async function GET() {
             return NextResponse.json({ user: null }, { status: 401 });
         }
 
-        return NextResponse.json({ user });
+        return NextResponse.json({
+            user: {
+                id: String(user.userId),
+                email: user.email,
+                name: user.username,
+                role: user.email === "admin@fleettrack.com" ? "ADMIN" : "USER",
+            },
+        });
     } catch (error) {
         console.error('Me route error:', error);
         return NextResponse.json({ user: null }, { status: 401 });

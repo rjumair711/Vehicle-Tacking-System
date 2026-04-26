@@ -39,9 +39,9 @@ export function Header() {
             <DropdownMenuTrigger asChild>
               <button className="flex items-center gap-2 rounded-lg p-2 hover:bg-muted">
                 <Avatar className="h-8 w-8">
-                  <AvatarImage src={user.avatar} alt={user.name} />
+                  <AvatarImage src="" alt={user.name} />
                   <AvatarFallback className="bg-primary text-primary-foreground">
-                    {user.name
+                    {(user?.name || user?.email || "U")
                       .split(' ')
                       .map((n) => n[0])
                       .join('')}

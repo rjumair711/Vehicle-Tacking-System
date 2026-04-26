@@ -1,29 +1,29 @@
-import { prisma } from '@/lib/prisma';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import { cookies } from 'next/headers';
-import { NextResponse } from 'next/server';
-import { z } from 'zod';
+import { prisma } from "@/lib/prisma";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
+import { z } from "zod";
 
 const createUserSchema = z.object({
-  name: z.string().min(2),
+  username: z.string().min(2),
   email: z.string().email(),
   password: z.string().min(6),
-  company: z.string().optional(),
 });
 
 async function getCurrentAdmin() {
   const cookieStore = await cookies();
-  const token = cookieStore.get('token')?.value;
+  const token = cookieStore.get("token")?.value;
 
   if (!token) return null;
 
   const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
-    userId: string;
-    role: string;
+    userId: number;
+    email: string;
   };
 
-  if (decoded.role !== 'ADMIN') return null;
+  // temporary admin check by email
+  if (decoded.email !== "admin@fleettrack.com") return null;
 
   return decoded;
 }
@@ -33,7 +33,7 @@ export async function POST(req: Request) {
     const admin = await getCurrentAdmin();
 
     if (!admin) {
-      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
     const body = await req.json();
@@ -41,12 +41,12 @@ export async function POST(req: Request) {
 
     if (!parsed.success) {
       return NextResponse.json(
-        { message: 'Invalid input', errors: parsed.error.flatten() },
+        { message: "Invalid input", errors: parsed.error.flatten() },
         { status: 400 }
       );
     }
 
-    const { name, email, password, company } = parsed.data;
+    const { username, email, password } = parsed.data;
 
     const existingUser = await prisma.user.findUnique({
       where: { email },
@@ -54,7 +54,7 @@ export async function POST(req: Request) {
 
     if (existingUser) {
       return NextResponse.json(
-        { message: 'User already exists' },
+        { message: "User already exists" },
         { status: 409 }
       );
     }
@@ -63,29 +63,33 @@ export async function POST(req: Request) {
 
     const user = await prisma.user.create({
       data: {
-        name,
+        username,
         email,
         passwordHash,
-        role: 'USER',
-        company,
       },
       select: {
-        id: true,
-        name: true,
+        userId: true,
+        username: true,
         email: true,
-        role: true,
-        company: true,
       },
     });
 
     return NextResponse.json(
-      { message: 'User created successfully', user },
+      {
+        message: "User created successfully",
+        user: {
+          id: String(user.userId),
+          name: user.username,
+          email: user.email,
+          role: "USER",
+        },
+      },
       { status: 201 }
     );
   } catch (error) {
-    console.error('Create user error:', error);
+    console.error("Create user error:", error);
     return NextResponse.json(
-      { message: 'Internal server error' },
+      { message: "Internal server error" },
       { status: 500 }
     );
   }
@@ -94,21 +98,30 @@ export async function POST(req: Request) {
 export async function GET() {
   try {
     const users = await prisma.user.findMany({
-      where: { role: 'USER' },
+      where: {
+        email: {
+          not: "admin@fleettrack.com",
+        },
+      },
       select: {
-        id: true,
-        name: true,
+        userId: true,
+        username: true,
         email: true,
-        role: true,
-        company: true,
       },
     });
 
-    return NextResponse.json({ users });
+    return NextResponse.json({
+      users: users.map((user) => ({
+        id: String(user.userId),
+        name: user.username,
+        email: user.email,
+        role: "USER",
+      })),
+    });
   } catch (error) {
-    console.error('Fetch users error:', error);
+    console.error("Fetch users error:", error);
     return NextResponse.json(
-      { message: 'Internal server error' },
+      { message: "Internal server error" },
       { status: 500 }
     );
   }

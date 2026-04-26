@@ -3,18 +3,18 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/authContext';
-import { generateMockTrips, generateMockVehicles } from '@/lib/mockData';
-import { Trip, Vehicle } from '@/types';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { generateMockTrips, generateMockTrackers } from '@/lib/mockData';
+import { TrackingDevice, Trip } from '@/types';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Fuel, Gauge, MapPin, Clock, Navigation2 } from 'lucide-react';
+import {  Gauge, MapPin, Clock, Navigation2 } from 'lucide-react';
 
 export default function TripsPage() {
   const router = useRouter();
   const { user, isLoading } = useAuth();
   const [trips, setTrips] = useState<Trip[]>([]);
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [trackers, setTrackers] = useState<TrackingDevice[]>([]);
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
   const [isSheetOpen, setIsSheetOpen] = useState(false);
 
@@ -26,7 +26,7 @@ export default function TripsPage() {
 
   useEffect(() => {
     setTrips(generateMockTrips());
-    setVehicles(generateMockVehicles());
+    setTrackers(generateMockTrackers());
   }, []);
 
   if (isLoading || !user) return null;
@@ -43,7 +43,7 @@ export default function TripsPage() {
     <div className="space-y-6 p-4 sm:p-6">
       <div>
         <h1 className="text-3xl font-bold text-foreground">Trips</h1>
-        <p className="mt-2 text-muted-foreground">Vehicle trip history and analytics</p>
+        <p className="mt-2 text-muted-foreground">Tracker trip history and analytics</p>
       </div>
 
       {/* Filters */}
@@ -65,10 +65,10 @@ export default function TripsPage() {
             className="w-full text-left rounded-lg border border-border bg-card hover:bg-muted transition-colors p-4"
           >
             <div className="grid gap-4 md:grid-cols-5">
-              {/* Vehicle Info */}
+              {/* Tracker Info */}
               <div className="md:col-span-1">
-                <p className="font-semibold text-foreground">{trip.vehicleName}</p>
-                <p className="text-xs text-muted-foreground mt-1">{trip.vehicleId}</p>
+                <p className="font-semibold text-foreground">{trip.trackerName}</p>
+                <p className="text-xs text-muted-foreground mt-1">{trip.trackerId}</p>
               </div>
 
               {/* Time Info */}
@@ -118,7 +118,7 @@ export default function TripsPage() {
           {selectedTrip ? (
             <>
               <SheetHeader className="px-5 pr-14 shrink-0">
-                <SheetTitle>{selectedTrip.vehicleName}</SheetTitle>
+                <SheetTitle>{selectedTrip.trackerName}</SheetTitle>
                 <SheetDescription>Trip Details</SheetDescription>
               </SheetHeader>
 
@@ -192,8 +192,8 @@ export default function TripsPage() {
                     </CardHeader>
                     <CardContent>
                       <p className="font-mono text-sm text-foreground break-words">
-                        {selectedTrip.startLocation.lat.toFixed(4)},{" "}
-                        {selectedTrip.startLocation.lng.toFixed(4)}
+                        {selectedTrip.startLocation?.lat?.toFixed(4)},{" "}
+                        {selectedTrip.startLocation?.lng?.toFixed(4)}
                       </p>
                     </CardContent>
                   </Card>
@@ -217,13 +217,13 @@ export default function TripsPage() {
                   )}
 
                   {/* Driver */}
-                  {selectedTrip.driver && (
+                  {selectedTrip.trackerName && (
                     <Card className="border-border md:col-span-2">
                       <CardHeader className="pb-2">
                         <CardTitle className="text-sm">Driver</CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <p className="text-foreground">{selectedTrip.driver}</p>
+                        <p className="text-foreground">{selectedTrip.trackerName}</p>
                       </CardContent>
                     </Card>
                   )}

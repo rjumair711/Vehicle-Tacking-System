@@ -1,5 +1,5 @@
 // Role-based access control
-export type UserRole = 'admin' | 'viewer';
+export type UserRole = 'admin' | 'user';
 
 // User interface
 export interface User {
@@ -7,7 +7,7 @@ export interface User {
   email: string;
   name: string;
   role: UserRole;
-  company: string;
+  company?: string;
   avatar?: string;
 }
 
@@ -19,70 +19,81 @@ export interface Customer {
   company: string;
   phone?: string;
   status: 'active' | 'inactive';
-  assignedVehicleIds: string[];
+  assignedTrackerIds: string[];
   createdAt: Date;
 }
 
-// Vehicle status
-export type VehicleStatus = 'online' | 'offline' | 'idle' | 'moving' | 'parked';
+// Tracker status
+export type TrackerStatus = 'active' | 'inactive' | 'error' | 'suspended';
 
 // GPS location
 export interface Location {
   lat: number;
   lng: number;
   timestamp: Date;
-  accuracy?: number;
-  heading?: number;
   speed?: number;
 }
 
-// Vehicle interface
-export interface Vehicle {
+// Tracker / Device interface
+// Device = Vehicle + GPS Tracker in current simplified design
+export interface TrackingDevice {
   id: string;
-  name: string;
-  licensePlate: string;
-  status: 'online' | 'offline' | 'idle' | 'moving' | 'parked';
-  location: Location;
-  currentSpeed: number;
-  totalDistance: number;
-  fuelLevel: number;
-  lastUpdate: Date;
-  driver?: string;
-  deviceId: string;
-  companyId: string;
+  trackerId: string;
+
+  name?: string;
+  licensePlate?: string;
+
+  status: TrackerStatus;
+  battery?: number;
+  signalStrength?: number;
+  simCard?: string;
+
   customerId?: string;
+  userId?: string;
+
+  lastPing?: Date;
+  location?: Location;
 }
 
 // Trip history
 export interface Trip {
   id: string;
-  vehicleId: string;
-  vehicleName: string;
-  startLocation: Location;
+  trackerId: string;
+  trackerName?: string;
+
+  startLocation?: Location;
   endLocation?: Location;
+
   startTime: Date;
   endTime?: Date;
+
   distance: number;
   duration: number;
   averageSpeed: number;
-  maxSpeed: number;
+  maxSpeed?: number;
+
   status: 'active' | 'completed';
-  driver?: string;
+
+  routeGeoJson?: unknown;
 }
 
 // Alert types
-export type AlertType = 'speeding' | 'geofence' | 'idle' | 'maintenance' | 'offline';
+export type AlertType = 'crash' | 'speeding' | 'geofence' | 'offline';
 export type AlertPriority = 'critical' | 'high' | 'medium' | 'low';
 
 export interface Alert {
   id: string;
-  vehicleId: string;
-  vehicleName: string;
+
+  trackerId: string;
+  trackerName?: string;
+
   type: AlertType;
   priority: AlertPriority;
   message: string;
+
   timestamp: Date;
   location?: Location;
+
   isResolved: boolean;
   resolvedAt?: Date;
   resolvedBy?: string;
@@ -101,20 +112,6 @@ export interface Geofence {
   alertOnExit: boolean;
   companyId: string;
   createdAt: Date;
-}
-
-// Device management
-export interface TrackingDevice {
-  id: string;
-  vehicleId: string;
-  vehicleName: string;
-  imei: string;
-  status: 'active' | 'inactive' | 'error';
-  battery: number;
-  lastPing: Date;
-  signalStrength: number;
-  simCard?: string;
-  customerId?: string;
 }
 
 // Auth context

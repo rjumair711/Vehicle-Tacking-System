@@ -2,8 +2,8 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import AdminPageGuard from '@/components/AdminPageGuard';
-import { generateMockCustomers, generateMockVehicles } from '@/lib/mockData';
-import { Customer, Vehicle } from '@/types';
+import { generateMockTrackers } from '@/lib/mockData';
+import { Customer, TrackingDevice } from '@/types';
 
 import {
   Card,
@@ -24,9 +24,8 @@ import {
 } from '@/components/ui/sheet';
 
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 
-import { UserPlus, Building2, Mail, CarFront } from 'lucide-react';
+import { UserPlus, Building2, Mail } from 'lucide-react';
 
 interface NewCustomerForm {
   name: string;
@@ -46,7 +45,7 @@ const initialForm: NewCustomerForm = {
 
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [trackers, setTrackers] = useState<TrackingDevice[]>([]);
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isAssignOpen, setIsAssignOpen] = useState(false);
@@ -56,54 +55,50 @@ export default function CustomersPage() {
   const [form, setForm] = useState<NewCustomerForm>(initialForm);
   const [formError, setFormError] = useState('');
 
-  // Load mock data
- useEffect(() => {
-  const loadUsers = async () => {
-    try {
-      const res = await fetch('/api/users', {
-        credentials: 'include',
-      });
+  useEffect(() => {
+    const loadUsers = async () => {
+      try {
+        const res = await fetch('/api/users', {
+          credentials: 'include',
+        });
 
-      if (!res.ok) {
-        throw new Error('Failed to fetch users');
+        if (!res.ok) {
+          throw new Error('Failed to fetch users');
+        }
+
+        const data = await res.json();
+
+        const mappedCustomers: Customer[] = (data.users || []).map((user: any) => ({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          company: user.company || 'No Company',
+          phone: '',
+          status: 'active',
+          assignedTrackerIds: [],
+          createdAt: new Date(),
+        }));
+
+        setCustomers(mappedCustomers);
+      } catch (err) {
+        console.error(err);
       }
+    };
 
-      const data = await res.json();
+    loadUsers();
+    setTrackers(generateMockTrackers());
+  }, []);
 
-      const mappedCustomers: Customer[] = (data.users || []).map((user: any) => ({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        company: user.company || 'No Company',
-        phone: '',
-        status: 'active',
-        assignedVehicleIds: [],
-        createdAt: new Date(),
-      }));
-
-      setCustomers(mappedCustomers);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  loadUsers();
-  setVehicles(generateMockVehicles());
-}, []);
-
-  // Stats
   const activeCustomers = useMemo(
     () => customers.filter((c) => c.status === 'active').length,
     [customers]
   );
 
-  // Reset form
   const resetForm = () => {
     setForm(initialForm);
     setFormError('');
   };
 
-  // Add Customer
   const handleAddCustomer = async () => {
     try {
       setFormError('');
@@ -120,30 +115,27 @@ export default function CustomersPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          name: form.name,
+          username: form.name,
           email: form.email,
-          password: '123456', // temporary default password
-          company: form.company,
+          password: '123456'
         }),
       });
 
-      if (!res.ok) {
-        throw new Error('Failed to fetch users');
-      }
-
       const data = await res.json();
-      setCustomers(data.users || []);
 
       if (!res.ok) {
         throw new Error(data.message || 'Failed to create user');
       }
 
-      // add to UI immediately
       setCustomers((prev) => [
         {
-          ...data.user,
-          assignedVehicleIds: [],
+          id: data.user.id,
+          name: data.user.name,
+          email: data.user.email,
+          company: data.user.company || form.company,
+          phone: '',
           status: 'active',
+          assignedTrackerIds: [],
           createdAt: new Date(),
         },
         ...prev,
@@ -156,29 +148,29 @@ export default function CustomersPage() {
     }
   };
 
-  // Get assigned vehicles
-  const getAssignedVehicles = (ids: string[]) => {
-    return vehicles.filter((v) => ids.includes(v.id));
+  const getAssignedTrackers = (ids: string[]) => {
+    return trackers.filter((tracker) => ids.includes(tracker.trackerId));
   };
 
-  // Get unassigned vehicles
-  const getUnassignedVehicles = () => {
-    const assignedIds = customers.flatMap((c) => c.assignedVehicleIds);
-    return vehicles.filter((v) => !assignedIds.includes(v.id));
+  const getUnassignedTrackers = () => {
+    const assignedIds = customers.flatMap((customer) => customer.assignedTrackerIds);
+    return trackers.filter((tracker) => !assignedIds.includes(tracker.trackerId));
   };
 
-  // Assign vehicle
-  const handleAssignVehicle = (vehicleId: string) => {
+  const handleAssignTracker = (trackerId: string) => {
     if (!selectedCustomer) return;
 
     setCustomers((prev) =>
-      prev.map((c) =>
-        c.id === selectedCustomer.id
+      prev.map((customer) =>
+        customer.id === selectedCustomer.id
           ? {
-            ...c,
-            assignedVehicleIds: [...c.assignedVehicleIds, vehicleId],
+            ...customer,
+            assignedTrackerIds: [
+              ...customer.assignedTrackerIds,
+              trackerId,
+            ],
           }
-          : c
+          : customer
       )
     );
 
@@ -186,16 +178,42 @@ export default function CustomersPage() {
     setSelectedCustomer(null);
   };
 
+  const handleDeleteCustomer = async (customerId: string) => {
+    const confirmDelete = confirm(
+      "Are you sure you want to delete this customer?"
+    );
+
+    if (!confirmDelete) return;
+
+    try {
+      const res = await fetch(`/api/users/${customerId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || "Failed to delete customer");
+      }
+
+      setCustomers((prev) =>
+        prev.filter((customer) => customer.id !== customerId)
+      );
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
   return (
     <AdminPageGuard>
       <div className="space-y-6 p-4 sm:p-6">
-
         {/* Header */}
         <div className="flex justify-between">
           <div>
             <h1 className="text-3xl font-bold">Customers</h1>
             <p className="text-muted-foreground">
-              Manage customers and assign vehicles
+              Manage customers and assign trackers
             </p>
           </div>
 
@@ -213,19 +231,28 @@ export default function CustomersPage() {
         {/* Stats */}
         <div className="grid gap-4 sm:grid-cols-3">
           <Card>
-            <CardHeader><CardTitle>Total</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle>Total</CardTitle>
+            </CardHeader>
             <CardContent>{customers.length}</CardContent>
           </Card>
 
           <Card>
-            <CardHeader><CardTitle>Active</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle>Active</CardTitle>
+            </CardHeader>
             <CardContent>{activeCustomers}</CardContent>
           </Card>
 
           <Card>
-            <CardHeader><CardTitle>Vehicles Assigned</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle>Trackers Assigned</CardTitle>
+            </CardHeader>
             <CardContent>
-              {customers.reduce((sum, c) => sum + c.assignedVehicleIds.length, 0)}
+              {customers.reduce(
+                (sum, customer) => sum + customer.assignedTrackerIds.length,
+                0
+              )}
             </CardContent>
           </Card>
         </div>
@@ -233,22 +260,19 @@ export default function CustomersPage() {
         {/* Customers List */}
         <div className="space-y-4">
           {customers.map((customer) => {
-            const assignedVehicles = getAssignedVehicles(
-              customer.assignedVehicleIds
+            const assignedTrackers = getAssignedTrackers(
+              customer.assignedTrackerIds
             );
 
             return (
               <Card key={customer.id}>
                 <CardContent className="p-5 flex justify-between">
-
                   {/* Left */}
                   <div>
                     <div className="flex items-center gap-2">
                       <Building2 className="h-4 w-4" />
                       <h2 className="font-semibold">{customer.company}</h2>
-                      <Badge>
-                        {customer.status}
-                      </Badge>
+                      <Badge>{customer.status}</Badge>
                     </div>
 
                     <p>{customer.name}</p>
@@ -269,25 +293,35 @@ export default function CustomersPage() {
                         setIsAssignOpen(true);
                       }}
                     >
-                      Assign Vehicle
+                      Assign Tracker
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="w-full"
+                      onClick={() => handleDeleteCustomer(customer.id)}
+                    >
+                      Delete Customer
                     </Button>
 
-                    {assignedVehicles.length > 0 ? (
-                      assignedVehicles.map((v) => (
-                        <div key={v.id} className="text-sm border p-2 mb-2 rounded">
-                          <p>{v.name}</p>
+                    {assignedTrackers.length > 0 ? (
+                      assignedTrackers.map((tracker) => (
+                        <div
+                          key={tracker.trackerId}
+                          className="text-sm border p-2 mb-2 rounded"
+                        >
+                          <p>{tracker.name}</p>
                           <p className="text-xs text-muted-foreground">
-                            {v.licensePlate}
+                            {tracker.licensePlate}
                           </p>
                         </div>
                       ))
                     ) : (
                       <p className="text-sm text-muted-foreground">
-                        No vehicles
+                        No Trackers
                       </p>
                     )}
                   </div>
-
                 </CardContent>
               </Card>
             );
@@ -328,31 +362,30 @@ export default function CustomersPage() {
           </SheetContent>
         </Sheet>
 
-        {/* Assign Vehicle Sheet */}
+        {/* Assign Tracker Sheet */}
         <Sheet open={isAssignOpen} onOpenChange={setIsAssignOpen}>
           <SheetContent>
             <SheetHeader>
-              <SheetTitle>Assign Vehicle</SheetTitle>
+              <SheetTitle>Assign Tracker</SheetTitle>
               <SheetDescription>
                 Assign to {selectedCustomer?.company}
               </SheetDescription>
             </SheetHeader>
 
             <div className="mt-4 space-y-2">
-              {getUnassignedVehicles().map((v) => (
+              {getUnassignedTrackers().map((tracker) => (
                 <button
-                  key={v.id}
-                  onClick={() => handleAssignVehicle(v.id)}
+                  key={tracker.trackerId}
+                  onClick={() => handleAssignTracker(tracker.trackerId)}
                   className="w-full border p-3 text-left rounded hover:bg-muted"
                 >
-                  <p>{v.name}</p>
-                  <p className="text-xs">{v.licensePlate}</p>
+                  <p>{tracker.name}</p>
+                  <p className="text-xs">{tracker.licensePlate}</p>
                 </button>
               ))}
             </div>
           </SheetContent>
         </Sheet>
-
       </div>
     </AdminPageGuard>
   );

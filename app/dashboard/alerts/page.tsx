@@ -2,10 +2,9 @@
 
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/authContext';
-import { redirect } from "next/navigation";
 import { generateMockAlerts } from '@/lib/mockData';
 import { Alert as AlertType } from '@/types';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -138,7 +137,7 @@ export default function AlertsPage() {
                   <div className="mt-0.5 text-destructive">{getAlertIcon(alert.type)}</div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-semibold text-foreground">{alert.vehicleName}</p>
+                      <p className="font-semibold text-foreground">{alert.trackerName}</p>
                       <Badge variant={getPriorityColor(alert.priority)} className="text-xs">
                         {alert.priority.toUpperCase()}
                       </Badge>
@@ -181,7 +180,7 @@ export default function AlertsPage() {
               >
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
-                    <p className="font-medium text-foreground line-through">{alert.vehicleName}</p>
+                    <p className="font-medium text-foreground line-through">{alert.trackerName}</p>
                     <p className="text-xs text-muted-foreground">{alert.message}</p>
                   </div>
                   <Badge variant="outline" className="text-xs">
@@ -205,7 +204,7 @@ export default function AlertsPage() {
               <SheetHeader className="shrink-0 pr-12">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <SheetTitle className="pr-2">{selectedAlert.vehicleName}</SheetTitle>
+                    <SheetTitle className="pr-2">{selectedAlert.trackerName}</SheetTitle>
                     <SheetDescription>{selectedAlert.message}</SheetDescription>
                   </div>
 

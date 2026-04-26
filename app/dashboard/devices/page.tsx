@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import AdminPageGuard from '@/components/AdminPageGuard';
-import { generateMockDevices, generateMockVehicles } from '@/lib/mockData';
-import { TrackingDevice, Vehicle } from '@/types';
+import { generateMockDevices } from '@/lib/mockData';
+import { TrackingDevice } from '@/types';
 import {
   Card,
   CardContent,
@@ -35,8 +35,9 @@ import {
 type DeviceStatus = TrackingDevice['status'];
 
 interface NewDeviceForm {
-  vehicleName: string;
-  imei: string;
+  name: string;
+  trackerId: string;
+  licensePlate: string;
   simCard: string;
   battery: number;
   signalStrength: number;
@@ -44,8 +45,9 @@ interface NewDeviceForm {
 }
 
 const initialFormState: NewDeviceForm = {
-  vehicleName: '',
-  imei: '',
+  name: '',
+  trackerId: '',
+  licensePlate: '',
   simCard: '',
   battery: 100,
   signalStrength: -75,
@@ -54,7 +56,6 @@ const initialFormState: NewDeviceForm = {
 
 export default function DevicesPage() {
   const [devices, setDevices] = useState<TrackingDevice[]>([]);
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
 
   const [selectedDevice, setSelectedDevice] = useState<TrackingDevice | null>(null);
   const [isSheetOpen, setIsSheetOpen] = useState(false);
@@ -67,7 +68,6 @@ export default function DevicesPage() {
 
   useEffect(() => {
     setDevices(generateMockDevices());
-    setVehicles(generateMockVehicles());
   }, []);
 
   const getStatusColor = (status: TrackingDevice['status']) => {
@@ -100,29 +100,31 @@ export default function DevicesPage() {
   };
 
   const handleAddDevice = () => {
-    const trimmedVehicleName = newDevice.vehicleName.trim();
-    const trimmedImei = newDevice.imei.trim();
+    const trimmedName = newDevice.name.trim();
+    const trimmedTrackerId = newDevice.trackerId.trim();
     const trimmedSimCard = newDevice.simCard.trim();
+    const trimmedLicensePlate = newDevice.licensePlate.trim();
+    
 
-    if (!trimmedVehicleName || !trimmedImei) {
-      setFormError('Vehicle name and IMEI are required.');
+    if (!trimmedName || !trimmedTrackerId) {
+      setFormError('Vehicle name and Tracker ID are required.');
       return;
     }
 
-    const imeiExists = devices.some(
-      (device) => device.imei.trim() === trimmedImei
+    const trackerIdExists = devices.some(
+      (device) => device.trackerId.trim() === trimmedTrackerId
     );
 
-    if (imeiExists) {
-      setFormError('A device with this IMEI already exists.');
+    if (trackerIdExists) {
+      setFormError('A device with this Tracker already exists.');
       return;
     }
 
     const deviceToAdd: TrackingDevice = {
       id: crypto.randomUUID(),
-      vehicleId: crypto.randomUUID(),
-      vehicleName: trimmedVehicleName,
-      imei: trimmedImei,
+      trackerId: trimmedTrackerId,
+      name: trimmedName,
+      licensePlate: trimmedLicensePlate || undefined,
       simCard: trimmedSimCard || undefined,
       battery: Number(newDevice.battery),
       signalStrength: Number(newDevice.signalStrength),
@@ -133,44 +135,6 @@ export default function DevicesPage() {
     setDevices((prev) => [deviceToAdd, ...prev]);
     setIsAddDeviceOpen(false);
     resetForm();
-  };
-
-  const getAvailableVehicles = useMemo(() => {
-    const assignedVehicleIds = new Set(
-      devices
-        .filter((device) => selectedDevice ? device.id !== selectedDevice.id : true)
-        .map((device) => device.vehicleId)
-    );
-
-    return vehicles.filter((vehicle) => !assignedVehicleIds.has(vehicle.id));
-  }, [devices, vehicles, selectedDevice]);
-
-  const handleAttachVehicle = (vehicle: Vehicle) => {
-    if (!selectedDevice) return;
-
-    setDevices((prev) =>
-      prev.map((device) =>
-        device.id === selectedDevice.id
-          ? {
-              ...device,
-              vehicleId: vehicle.id,
-              vehicleName: vehicle.name,
-            }
-          : device
-      )
-    );
-
-    setSelectedDevice((prev) =>
-      prev
-        ? {
-            ...prev,
-            vehicleId: vehicle.id,
-            vehicleName: vehicle.name,
-          }
-        : prev
-    );
-
-    setIsAttachVehicleOpen(false);
   };
 
   return (
@@ -243,9 +207,9 @@ export default function DevicesPage() {
             >
               <div className="grid gap-4 md:grid-cols-5">
                 <div className="md:col-span-2">
-                  <p className="font-semibold text-foreground">{device.vehicleName}</p>
+                  <p className="font-semibold text-foreground">{device.name}</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    IMEI: {device.imei}
+                    Tracker ID: {device.trackerId}
                   </p>
                   {device.simCard && (
                     <p className="text-xs text-muted-foreground">{device.simCard}</p>
@@ -266,7 +230,7 @@ export default function DevicesPage() {
                   <div className="flex items-center gap-2">
                     <Signal className="h-4 w-4 text-primary" />
                     <span className="text-sm text-muted-foreground">
-                      {getSignalQuality(device.signalStrength)}
+                      {getSignalQuality(device.signalStrength ?? 0)}
                     </span>
                   </div>
                 </div>
@@ -283,7 +247,7 @@ export default function DevicesPage() {
             {selectedDevice ? (
               <>
                 <SheetHeader className="shrink-0 px-5 pr-14">
-                  <SheetTitle>{selectedDevice.vehicleName}</SheetTitle>
+                  <SheetTitle>{selectedDevice.name}</SheetTitle>
                   <SheetDescription>Device Information</SheetDescription>
                 </SheetHeader>
 
@@ -302,11 +266,11 @@ export default function DevicesPage() {
 
                     <Card className="border-border bg-muted/50">
                       <CardHeader className="pb-2">
-                        <CardTitle className="text-sm">IMEI</CardTitle>
+                        <CardTitle className="text-sm">Tracker ID</CardTitle>
                       </CardHeader>
                       <CardContent>
                         <p className="break-all font-mono text-sm text-foreground">
-                          {selectedDevice.imei}
+                          {selectedDevice.trackerId}
                         </p>
                       </CardContent>
                     </Card>
@@ -322,13 +286,12 @@ export default function DevicesPage() {
                         <div className="flex items-center gap-2">
                           <div className="h-3 flex-1 overflow-hidden rounded-full bg-muted">
                             <div
-                              className={`h-full ${
-                                selectedDevice.battery > 50
-                                  ? 'bg-green-500'
-                                  : selectedDevice.battery > 20
-                                    ? 'bg-yellow-500'
-                                    : 'bg-destructive'
-                              }`}
+                              className={`h-full ${selectedDevice.battery ?? 0 > 50
+                                ? 'bg-green-500'
+                                : selectedDevice.battery ?? 0 > 20
+                                  ? 'bg-yellow-500'
+                                  : 'bg-destructive'
+                                }`}
                               style={{ width: `${selectedDevice.battery}%` }}
                             />
                           </div>
@@ -349,10 +312,10 @@ export default function DevicesPage() {
                       <CardContent>
                         <div className="space-y-2">
                           <p className="font-mono text-sm text-foreground">
-                            {selectedDevice.signalStrength} dBm
+                            {selectedDevice.signalStrength ?? 0} dBm
                           </p>
                           <p className="text-sm text-muted-foreground">
-                            {getSignalQuality(selectedDevice.signalStrength)}
+                            {getSignalQuality(selectedDevice.signalStrength ?? 0)}
                           </p>
                         </div>
                       </CardContent>
@@ -367,7 +330,7 @@ export default function DevicesPage() {
                       </CardHeader>
                       <CardContent>
                         <p className="text-sm text-foreground">
-                          {selectedDevice.lastPing.toLocaleString()}
+                          {selectedDevice.lastPing?.toLocaleString()}
                         </p>
                       </CardContent>
                     </Card>
@@ -394,10 +357,10 @@ export default function DevicesPage() {
                       </CardHeader>
                       <CardContent>
                         <p className="font-medium text-foreground">
-                          {selectedDevice.vehicleName}
+                          {selectedDevice.name}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          Vehicle ID: {selectedDevice.vehicleId}
+                          License Plate: {selectedDevice.licensePlate ?? 'N/A'}
                         </p>
                       </CardContent>
                     </Card>
@@ -456,7 +419,7 @@ export default function DevicesPage() {
                 <Input
                   id="vehicleName"
                   placeholder="e.g. Toyota Corolla - #007"
-                  value={newDevice.vehicleName}
+                  value={newDevice.name}
                   onChange={(e) =>
                     setNewDevice((prev) => ({
                       ...prev,
@@ -467,15 +430,15 @@ export default function DevicesPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="imei">IMEI</Label>
+                <Label htmlFor="trackerId">Tracker ID</Label>
                 <Input
-                  id="imei"
-                  placeholder="Enter device IMEI"
-                  value={newDevice.imei}
+                  id="trackerId"
+                  placeholder="Enter Device Tracker ID"
+                  value={newDevice.trackerId}
                   onChange={(e) =>
                     setNewDevice((prev) => ({
                       ...prev,
-                      imei: e.target.value,
+                      trackerId: e.target.value,
                     }))
                   }
                 />
@@ -578,30 +541,9 @@ export default function DevicesPage() {
             <SheetHeader>
               <SheetTitle>Attach Vehicle</SheetTitle>
               <SheetDescription>
-                Select a vehicle for device {selectedDevice?.imei}
+                Select a vehicle for device {selectedDevice?.trackerId}
               </SheetDescription>
             </SheetHeader>
-
-            <div className="mt-6 space-y-3">
-              {getAvailableVehicles.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No available vehicles to attach.
-                </p>
-              ) : (
-                getAvailableVehicles.map((vehicle) => (
-                  <button
-                    key={vehicle.id}
-                    onClick={() => handleAttachVehicle(vehicle)}
-                    className="w-full rounded-lg border border-border p-3 text-left transition-colors hover:bg-muted"
-                  >
-                    <p className="font-medium text-foreground">{vehicle.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {vehicle.licensePlate}
-                    </p>
-                  </button>
-                ))
-              )}
-            </div>
           </SheetContent>
         </Sheet>
       </div>

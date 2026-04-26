@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,86 +7,71 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
-enum UserRole {
-  ADMIN
-  USER
-}
-
-enum DeviceStatus {
-  ACTIVE
-  INACTIVE
-  ERROR
-  SUSPENDED
-}
-
-enum VehicleStatus {
-  ONLINE
-  OFFLINE
-  IDLE
-  MOVING
-  PARKED
-}
-
 model User {
-  id           String        @id @default(cuid())
-  email        String        @unique
-  name         String
-  passwordHash String
-  role         UserRole      @default(USER)
-  company      String?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  userId       Int      @id @default(autoincrement()) @map("user_id")
+  username     String   @db.VarChar(100)
+  email        String   @unique @db.VarChar(150)
+  passwordHash String   @map("password_hash")
 
-  vehicles     Vehicle[]
-  settings     UserSettings?
+  trackers     Tracker[]
+
+  @@map("users")
 }
 
-model Vehicle {
-  id            String         @id @default(cuid())
-  name          String
-  licensePlate  String         @unique
-  status        VehicleStatus  @default(OFFLINE)
-  currentSpeed  Float          @default(0)
-  totalDistance Float          @default(0)
-  fuelLevel     Float          @default(100)
-  driver        String?
-  companyId     String?
-  ownerId       String?
-  owner         User?          @relation(fields: [ownerId], references: [id])
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+model Tracker {
+  trackerId       String @id @map("tracker_id") @db.VarChar(100)
+  userId          Int    @map("user_id")
+  secretTokenHash String @map("secret_token_hash")
 
-  device        TrackingDevice?
+  name            String? @db.VarChar(100)
+  licensePlate    String? @map("license_plate") @db.VarChar(50)
+  status          String? @default("ACTIVE") @db.VarChar(30)
+
+  user            User @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  locationPoints  LocationPoint[]
+  tripHistory     TripHistory[]
+
+  @@map("trackers")
 }
 
-model TrackingDevice {
-  id              String       @id @default(cuid())
-  imei            String       @unique
-  deviceTokenHash String
-  status          DeviceStatus @default(ACTIVE)
-  battery         Int          @default(100)
-  signalStrength  Int          @default(0)
-  simCard         String?
-  vehicleId       String       @unique
-  vehicle         Vehicle      @relation(fields: [vehicleId], references: [id])
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+model LocationPoint {
+  pointId    BigInt   @id @default(autoincrement()) @map("point_id")
+  trackerId  String   @map("tracker_id") @db.VarChar(100)
+
+  longitude  Float
+  latitude   Float
+  speed      Float
+  crash      Boolean? @default(false)
+
+  recordedAt DateTime @map("recorded_at") @db.Timestamp(6)
+
+  // PostGIS geometry(Point, 4326)
+  location   Unsupported("geometry(Point, 4326)")?
+
+  tracker    Tracker @relation(fields: [trackerId], references: [trackerId], onDelete: Cascade)
+
+  @@index([trackerId, recordedAt], map: "idx_location_tracker_time")
+  @@map("location_points")
 }
 
-model UserSettings {
-  id                String   @id @default(cuid())
-  userId            String   @unique
-  emailAlerts       Boolean  @default(true)
-  speedingAlerts    Boolean  @default(true)
-  geofenceAlerts    Boolean  @default(true)
-  maintenanceAlerts Boolean  @default(true)
-  offlineAlerts     Boolean  @default(true)
-  theme             String   @default("dark")
-  speedUnit         String   @default("km/h")
-  temperatureUnit   String   @default("C")
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+model TripHistory {
+  tripId        BigInt    @id @default(autoincrement()) @map("trip_id")
+  trackerId     String    @map("tracker_id") @db.VarChar(100)
 
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tripDate      DateTime  @map("trip_date") @db.Date
+  startTime     DateTime? @map("start_time") @db.Timestamp(6)
+  endTime       DateTime? @map("end_time") @db.Timestamp(6)
+
+  totalDistance Float?    @default(0) @map("total_distance")
+  averageSpeed  Float?    @default(0) @map("average_speed")
+
+  // PostGIS geometry(LineString, 4326)
+  route         Unsupported("geometry(LineString, 4326)")?
+
+  tracker       Tracker @relation(fields: [trackerId], references: [trackerId], onDelete: Cascade)
+
+  @@unique([trackerId, tripDate], map: "unique_tracker_trip_date")
+  @@index([trackerId, tripDate], map: "idx_trip_tracker_date")
+  @@map("trip_history")
 }

@@ -9,7 +9,6 @@ interface User {
   email: string;
   name: string;
   role: UserRole;
-  company?: string | null;
 }
 
 interface AuthContextType {

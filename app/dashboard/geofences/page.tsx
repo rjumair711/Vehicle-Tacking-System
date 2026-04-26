@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { MapPin, Plus, Edit2, Trash2 } from 'lucide-react';
+import { Plus, Edit2, Trash2 } from 'lucide-react';
 
 export default function GeofencesPage() {
   const router = useRouter();
@@ -65,7 +65,7 @@ export default function GeofencesPage() {
     setIsSheetOpen(false);
   };
 
-  const canManageGeofences = checkPermission('manager');
+  const canManageGeofences = checkPermission('ADMIN');
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
