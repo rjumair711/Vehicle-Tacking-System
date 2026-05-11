@@ -58,6 +58,25 @@ const centerLat = 33.6844;
 const centerLng = 73.0479;
 const radiusKm = 15;
 
+// Fixed base locations for trackers.
+// Each tracker moves only slightly around its own base location.
+const trackerBaseLocations = [
+  { lat: 33.6844, lng: 73.0479 },
+  { lat: 33.6938, lng: 73.0652 },
+  { lat: 33.6736, lng: 73.0567 },
+];
+
+function getSmallMovementLocation(base: { lat: number; lng: number }) {
+  const maxMovement = 0.0015;
+  // 0.0015 degrees is roughly 100–170 meters.
+  // This keeps demo tracker movement small and realistic.
+
+  return {
+    lat: base.lat + (Math.random() - 0.5) * maxMovement,
+    lng: base.lng + (Math.random() - 0.5) * maxMovement,
+  };
+}
+
 function getRandomLocation() {
   const randomAngle = Math.random() * Math.PI * 2;
   const randomRadius = (Math.random() * radiusKm) / 111;
@@ -70,59 +89,67 @@ function getRandomLocation() {
 
 // Generate mock trackers
 export const generateMockTrackers = (): TrackingDevice[] => {
-  return [
+  const trackers = [
     {
       id: 'TRK001',
       trackerId: 'TRK001',
       name: 'Suzuki Cultus - #001',
       licensePlate: 'ICT-001',
-      status: 'active',
+      status: 'active' as const,
       battery: 85,
       signalStrength: -65,
       simCard: 'SIM001',
       customerId: 'customer-001',
       lastPing: new Date(Date.now() - 30000),
-      location: {
-        ...getRandomLocation(),
-        speed: 45,
-        timestamp: new Date(),
-      },
+      speed: 45,
     },
     {
       id: 'TRK002',
       trackerId: 'TRK002',
       name: 'Toyota Corolla - #002',
       licensePlate: 'ICT-002',
-      status: 'active',
+      status: 'active' as const,
       battery: 92,
       signalStrength: -72,
       simCard: 'SIM002',
       customerId: 'customer-001',
       lastPing: new Date(Date.now() - 45000),
-      location: {
-        ...getRandomLocation(),
-        speed: 60,
-        timestamp: new Date(),
-      },
+      speed: 60,
     },
     {
       id: 'TRK003',
       trackerId: 'TRK003',
       name: 'Honda City - #003',
       licensePlate: 'ICT-003',
-      status: 'error',
+      status: 'error' as const,
       battery: 15,
       signalStrength: -95,
       simCard: 'SIM003',
       customerId: 'customer-002',
       lastPing: new Date(Date.now() - 3600000),
-      location: {
-        ...getRandomLocation(),
-        speed: 0,
-        timestamp: new Date(),
-      },
+      speed: 0,
     },
   ];
+
+  return trackers.map((tracker, index) => ({
+    id: tracker.id,
+    trackerId: tracker.trackerId,
+    name: tracker.name,
+    licensePlate: tracker.licensePlate,
+    status: tracker.status,
+    battery: tracker.battery,
+    signalStrength: tracker.signalStrength,
+    simCard: tracker.simCard,
+    customerId: tracker.customerId,
+    lastPing: tracker.lastPing,
+    location: {
+      ...getSmallMovementLocation(
+        trackerBaseLocations[index % trackerBaseLocations.length]
+      ),
+      speed: tracker.speed,
+      timestamp: new Date(),
+    },
+  }));
 };
 
 // Backward-compatible alias
@@ -132,34 +159,80 @@ export const generateMockDevices = generateMockTrackers;
 // Generate mock trips
 export const generateMockTrips = (): Trip[] => {
   const trips: Trip[] = [];
+
   const trackerIds = ['TRK001', 'TRK002', 'TRK003'];
+
   const trackerNames = [
     'Suzuki Cultus - #001',
     'Toyota Corolla - #002',
     'Honda City - #003',
   ];
 
+  const demoRoutes = [
+    [
+      { lat: 33.6844, lng: 73.0479 },
+      { lat: 33.6901, lng: 73.0551 },
+      { lat: 33.6982, lng: 73.0635 },
+      { lat: 33.7076, lng: 73.0732 },
+    ],
+    [
+      { lat: 33.6568, lng: 73.0169 },
+      { lat: 33.6655, lng: 73.0251 },
+      { lat: 33.6769, lng: 73.0382 },
+      { lat: 33.6844, lng: 73.0479 },
+    ],
+    [
+      { lat: 33.7000, lng: 73.0600 },
+      { lat: 33.7060, lng: 73.0680 },
+      { lat: 33.7130, lng: 73.0760 },
+      { lat: 33.7200, lng: 73.0850 },
+    ],
+  ];
+
   for (let i = 0; i < 6; i++) {
     const trackerIndex = i % trackerIds.length;
+
     const startTime = new Date(Date.now() - (i + 1) * 3600000);
-    const endTime = new Date(startTime.getTime() + Math.random() * 7200000);
-    const distance = Math.floor(Math.random() * 120) + 10;
+    const endTime = new Date(startTime.getTime() + 45 * 60000);
+
     const duration = endTime.getTime() - startTime.getTime();
-    const avgSpeed = Math.floor((distance * 60) / (duration / 3600000));
+    const durationMinutes = Math.floor(duration / 60000);
+    const durationHours = duration / 3600000;
+
+    const distance = 12 + i * 4;
+    const avgSpeed = Math.round(distance / durationHours);
+
+    const routePoints = demoRoutes[trackerIndex];
+    const startPoint = routePoints[0];
+    const endPoint = routePoints[routePoints.length - 1];
 
     trips.push({
       id: `trip-${i + 1}`,
       trackerId: trackerIds[trackerIndex],
       trackerName: trackerNames[trackerIndex],
-      startLocation: { ...getRandomLocation(), timestamp: startTime },
-      endLocation: { ...getRandomLocation(), timestamp: endTime },
+
+      startLocation: {
+        ...startPoint,
+        timestamp: startTime,
+      },
+
+      endLocation: {
+        ...endPoint,
+        timestamp: endTime,
+      },
+
       startTime,
       endTime,
       distance,
-      duration: Math.floor(duration / 60000),
+      duration: durationMinutes,
       averageSpeed: avgSpeed,
-      maxSpeed: avgSpeed + Math.floor(Math.random() * 30),
+      maxSpeed: avgSpeed + 15,
       status: 'completed',
+
+      routeGeoJson: {
+        type: 'LineString',
+        coordinates: routePoints.map((point) => [point.lng, point.lat]),
+      },
     });
   }
 
@@ -169,6 +242,7 @@ export const generateMockTrips = (): Trip[] => {
 // Generate mock alerts
 export const generateMockAlerts = (): Alert[] => {
   const alerts: Alert[] = [];
+
   const alertTypes: Array<'crash' | 'speeding' | 'geofence' | 'offline'> = [
     'crash',
     'speeding',
@@ -198,7 +272,10 @@ export const generateMockAlerts = (): Alert[] => {
       priority: ['critical', 'high', 'medium', 'low'][index] as any,
       message: messages[type],
       timestamp: new Date(Date.now() - Math.random() * 3600000),
-      location: getRandomLocation() as any,
+      location: {
+        ...getRandomLocation(),
+        timestamp: new Date(),
+      },
       isResolved: Math.random() > 0.5,
       resolvedAt:
         Math.random() > 0.5

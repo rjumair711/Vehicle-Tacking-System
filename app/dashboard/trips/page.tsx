@@ -8,7 +8,7 @@ import { TrackingDevice, Trip } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import {  Gauge, MapPin, Clock, Navigation2 } from 'lucide-react';
+import { Gauge, MapPin, Clock, Navigation2 } from 'lucide-react';
 
 export default function TripsPage() {
   const router = useRouter();
@@ -39,6 +39,10 @@ export default function TripsPage() {
     return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
   };
 
+  const openTripOnMap = (trip: Trip) => {
+    router.push(`/dashboard/map?tripId=${trip.id}&trackerId=${trip.trackerId}`);
+  };
+
   return (
     <div className="space-y-6 p-4 sm:p-6">
       <div>
@@ -58,10 +62,7 @@ export default function TripsPage() {
         {trips.map((trip) => (
           <button
             key={trip.id}
-            onClick={() => {
-              setSelectedTrip(trip);
-              setIsSheetOpen(true);
-            }}
+            onClick={() => openTripOnMap(trip)}
             className="w-full text-left rounded-lg border border-border bg-card hover:bg-muted transition-colors p-4"
           >
             <div className="grid gap-4 md:grid-cols-5">
@@ -191,7 +192,7 @@ export default function TripsPage() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <p className="font-mono text-sm text-foreground break-words">
+                      <p className="font-mono text-sm text-foreground wrap-break-word">
                         {selectedTrip.startLocation?.lat?.toFixed(4)},{" "}
                         {selectedTrip.startLocation?.lng?.toFixed(4)}
                       </p>
@@ -208,7 +209,7 @@ export default function TripsPage() {
                         </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <p className="font-mono text-sm text-foreground break-words">
+                        <p className="font-mono text-sm text-foreground wrap-break-word">
                           {selectedTrip.endLocation.lat.toFixed(4)},{" "}
                           {selectedTrip.endLocation.lng.toFixed(4)}
                         </p>
