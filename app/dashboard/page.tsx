@@ -145,7 +145,7 @@ export default function DashboardPage() {
                 .slice(0, 3)
                 .map((alert) => (
                   <div key={alert.id} className="flex items-start gap-3 rounded-lg border border-destructive/20 bg-destructive/5 p-3">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 text-destructive flex-shrink-0" />
+                    <AlertTriangle className="mt-0.5 h-4 w-4 text-destructive shrink-0" />
                     <div className="flex-1">
                       <p className="text-sm font-medium text-foreground">{alert.trackerName}</p>
                       <p className="text-xs text-muted-foreground">{alert.message}</p>

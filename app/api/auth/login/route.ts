@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 export async function POST(req: Request) {
   try {
     const { email, password } = await req.json();
-
+    
     if (!email || !password) {
       return NextResponse.json(
         { message: "Email and password are required" },
@@ -49,7 +49,7 @@ export async function POST(req: Request) {
         id: String(user.userId),
         email: user.email,
         name: user.username,
-        role: "admin",
+        role: user.email === "admin@fleettrack.com" ? "admin" : "customer",
       },
     });
 

@@ -12,20 +12,21 @@ const createUserSchema = z.object({
 });
 
 async function getCurrentAdmin() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get("token")?.value;
+  try {
+    const cookieStore = await cookies();
+    const token = cookieStore.get("token")?.value;
+    if (!token) return null;
 
-  if (!token) return null;
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
+      userId: number;
+      email: string;
+    };
 
-  const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
-    userId: number;
-    email: string;
-  };
-
-  // temporary admin check by email
-  if (decoded.email !== "admin@fleettrack.com") return null;
-
-  return decoded;
+    if (decoded.email !== "admin@fleettrack.com") return null;
+    return decoded;
+  } catch {
+    return null;   // ← handles expired/invalid token gracefully
+  }
 }
 
 export async function POST(req: Request) {

@@ -23,6 +23,15 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+
 import { Input } from '@/components/ui/input';
 
 import { UserPlus, Building2, Mail } from 'lucide-react';
@@ -31,6 +40,7 @@ interface NewCustomerForm {
   name: string;
   email: string;
   company: string;
+  password: string;
   phone: string;
   status: 'active' | 'inactive';
 }
@@ -39,6 +49,7 @@ const initialForm: NewCustomerForm = {
   name: '',
   email: '',
   company: '',
+  password: "",
   phone: '',
   status: 'active',
 };
@@ -54,6 +65,9 @@ export default function CustomersPage() {
 
   const [form, setForm] = useState<NewCustomerForm>(initialForm);
   const [formError, setFormError] = useState('');
+
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null);
 
   useEffect(() => {
     const loadUsers = async () => {
@@ -103,8 +117,13 @@ export default function CustomersPage() {
     try {
       setFormError('');
 
-      if (!form.name || !form.email || !form.company) {
+      if (!form.name || !form.email || !form.company || !form.password) {
         setFormError('All fields are required');
+        return;
+      }
+
+      if (form.password.length < 6) {
+        setFormError('Password must be at least 6 characters');
         return;
       }
 
@@ -117,7 +136,7 @@ export default function CustomersPage() {
         body: JSON.stringify({
           username: form.name,
           email: form.email,
-          password: '123456'
+          password: form.password
         }),
       });
 
@@ -178,15 +197,18 @@ export default function CustomersPage() {
     setSelectedCustomer(null);
   };
 
-  const handleDeleteCustomer = async (customerId: string) => {
-    const confirmDelete = confirm(
-      "Are you sure you want to delete this customer?"
-    );
+  // Opens the dialog
+  const confirmDeleteCustomer = (customer: Customer) => {
+    setCustomerToDelete(customer);
+    setIsDeleteOpen(true);
+  };
 
-    if (!confirmDelete) return;
+  // Actually deletes after confirmation
+  const handleDeleteCustomer = async () => {
+    if (!customerToDelete) return;
 
     try {
-      const res = await fetch(`/api/users/${customerId}`, {
+      const res = await fetch(`/api/users/${customerToDelete.id}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -198,10 +220,13 @@ export default function CustomersPage() {
       }
 
       setCustomers((prev) =>
-        prev.filter((customer) => customer.id !== customerId)
+        prev.filter((customer) => customer.id !== customerToDelete.id)
       );
     } catch (err: any) {
       alert(err.message);
+    } finally {
+      setIsDeleteOpen(false);
+      setCustomerToDelete(null);
     }
   };
 
@@ -266,73 +291,73 @@ export default function CustomersPage() {
 
             return (
               <Card key={customer.id} className="rounded-2xl">
-  <CardContent className="flex flex-col gap-5 p-6 md:flex-row md:items-start md:justify-between">
-    {/* Left */}
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Building2 className="h-4 w-4 text-muted-foreground" />
-        <h2 className="text-lg font-semibold leading-none">
-          {customer.company}
-        </h2>
-        <Badge className="px-3 py-1 text-xs">
-          {customer.status}
-        </Badge>
-      </div>
+                <CardContent className="flex flex-col gap-5 p-6 md:flex-row md:items-start md:justify-between">
+                  {/* Left */}
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Building2 className="h-4 w-4 text-muted-foreground" />
+                      <h2 className="text-lg font-semibold leading-none">
+                        {customer.company}
+                      </h2>
+                      <Badge className="px-3 py-1 text-xs">
+                        {customer.status}
+                      </Badge>
+                    </div>
 
-      <p className="text-sm font-medium">
-        {customer.name}
-      </p>
+                    <p className="text-sm font-medium">
+                      {customer.name}
+                    </p>
 
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Mail className="h-4 w-4" />
-        <span>{customer.email}</span>
-      </div>
-    </div>
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Mail className="h-4 w-4" />
+                      <span>{customer.email}</span>
+                    </div>
+                  </div>
 
-    {/* Right */}
-    <div className="flex w-full flex-col gap-3 md:w-[280px]">
-      <Button
-        size="sm"
-        className="w-full"
-        onClick={() => {
-          setSelectedCustomer(customer);
-          setIsAssignOpen(true);
-        }}
-      >
-        Assign Tracker
-      </Button>
+                  {/* Right */}
+                  <div className="flex w-full flex-col gap-3 md:w-70">
+                    <Button
+                      size="sm"
+                      className="w-full"
+                      onClick={() => {
+                        setSelectedCustomer(customer);
+                        setIsAssignOpen(true);
+                      }}
+                    >
+                      Assign Tracker
+                    </Button>
 
-      <Button
-        size="sm"
-        variant="destructive"
-        className="w-full"
-        onClick={() => handleDeleteCustomer(customer.id)}
-      >
-        Delete Customer
-      </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      className="w-full"
+                      onClick={() => confirmDeleteCustomer(customer)}
+                    >
+                      Delete Customer
+                    </Button>
 
-      <div className="mt-1 space-y-2">
-        {assignedTrackers.length > 0 ? (
-          assignedTrackers.map((tracker) => (
-            <div
-              key={tracker.trackerId}
-              className="rounded-lg border bg-muted/30 p-3 text-sm"
-            >
-              <p className="font-medium">{tracker.name}</p>
-              <p className="text-xs text-muted-foreground">
-                {tracker.licensePlate}
-              </p>
-            </div>
-          ))
-        ) : (
-          <p className="pt-1 text-sm text-muted-foreground">
-            No Trackers
-          </p>
-        )}
-      </div>
-    </div>
-  </CardContent>
-</Card>
+                    <div className="mt-1 space-y-2">
+                      {assignedTrackers.length > 0 ? (
+                        assignedTrackers.map((tracker) => (
+                          <div
+                            key={tracker.trackerId}
+                            className="rounded-lg border bg-muted/30 p-3 text-sm"
+                          >
+                            <p className="font-medium">{tracker.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {tracker.licensePlate}
+                            </p>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="pt-1 text-sm text-muted-foreground">
+                          No Trackers
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             );
           })}
         </div>
@@ -359,7 +384,12 @@ export default function CustomersPage() {
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
               />
-
+              <Input
+                placeholder="Password"
+                type="password"
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+              />
               <Input
                 placeholder="Company"
                 value={form.company}
@@ -396,6 +426,38 @@ export default function CustomersPage() {
           </SheetContent>
         </Sheet>
       </div>
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Customer</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete{' '}
+              <span className="font-semibold text-foreground">
+                {customerToDelete?.name}
+              </span>
+              ? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2 sm:justify-end">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsDeleteOpen(false);
+                setCustomerToDelete(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteCustomer}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AdminPageGuard>
   );
 }

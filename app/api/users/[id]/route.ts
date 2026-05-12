@@ -3,12 +3,13 @@ import { prisma } from "@/lib/prisma";
 
 export async function DELETE(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const userId = Number(params.id);
+    const { id } = await params;
+    const userId = Number(id);
 
-    if (!userId) {
+    if (!userId || isNaN(userId)) {
       return NextResponse.json(
         { message: "Invalid user ID" },
         { status: 400 }
@@ -16,9 +17,7 @@ export async function DELETE(
     }
 
     await prisma.user.delete({
-      where: {
-        userId: userId,
-      },
+      where: { userId },
     });
 
     return NextResponse.json({
@@ -26,7 +25,6 @@ export async function DELETE(
     });
   } catch (error) {
     console.error("Delete customer error:", error);
-
     return NextResponse.json(
       { message: "Failed to delete customer" },
       { status: 500 }
