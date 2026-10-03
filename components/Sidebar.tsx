@@ -16,6 +16,8 @@ import {
   LogOut,
   Home,
   Users,
+  HardDriveDownload,
+  Share2,
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -33,8 +35,10 @@ const navItems: NavItem[] = [
   { href: '/dashboard/trips', label: 'Trips', icon: <History className="h-5 w-5" />, key: 'trips' },
   { href: '/dashboard/alerts', label: 'Alerts', icon: <AlertTriangle className="h-5 w-5" />, key: 'alerts' },
   { href: '/dashboard/geofences', label: 'Geofences', icon: <Waypoints className="h-5 w-5" />, key: 'geofences' },
+  { href: '/dashboard/sharing', label: 'Sharing', icon: <Share2 className="h-5 w-5" />, key: 'sharing' },
   { href: '/dashboard/customers', label: 'Customers', icon: <Users className="h-5 w-5" />, key: 'customers' },
   { href: '/dashboard/devices', label: 'Devices', icon: <Smartphone className="h-5 w-5" />, key: 'devices' },
+  { href: '/dashboard/firmware', label: 'Firmware', icon: <HardDriveDownload className="h-5 w-5" />, key: 'firmware' },
 ];
 
 export function Sidebar() {

@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { forbidden, getSession, unauthorized } from "@/lib/auth";
 
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await getSession();
+  if (!session) return unauthorized();
+  if (!session.isAdmin) return forbidden();
+
   try {
     const { id } = await params;
     const userId = Number(id);
@@ -16,6 +21,14 @@ export async function DELETE(
       );
     }
 
+    if (userId === session.userId) {
+      return NextResponse.json(
+        { message: "The admin account cannot be deleted" },
+        { status: 400 }
+      );
+    }
+
+    // Deleting a customer also deletes their trackers and tracking data.
     await prisma.user.delete({
       where: { userId },
     });

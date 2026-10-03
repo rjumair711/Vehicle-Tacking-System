@@ -12,8 +12,11 @@ model User {
   username     String   @db.VarChar(100)
   email        String   @unique @db.VarChar(150)
   passwordHash String   @map("password_hash")
+  company      String?  @db.VarChar(150)
 
   trackers     Tracker[]
+  settings     UserSettings?
+  sharedWithMe TrackerShare[]
 
   @@map("users")
 }
@@ -27,10 +30,21 @@ model Tracker {
   licensePlate    String? @map("license_plate") @db.VarChar(50)
   status          String? @default("ACTIVE") @db.VarChar(30)
 
+  // Last known position (updated by /api/tracker-data)
+  lastLongitude   Float?    @map("last_longitude")
+  lastLatitude    Float?    @map("last_latitude")
+  lastSpeed       Float?    @map("last_speed")
+  lastRecordedAt  DateTime? @map("last_recorded_at") @db.Timestamp(6)
+  lastReceivedAt  DateTime? @map("last_received_at") @db.Timestamp(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+
   user            User @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
   locationPoints  LocationPoint[]
   tripHistory     TripHistory[]
+  alerts          Alert[]
+  geofences       Geofence[]
+  shares          TrackerShare[]
 
   @@map("trackers")
 }
@@ -51,6 +65,7 @@ model LocationPoint {
 
   tracker    Tracker @relation(fields: [trackerId], references: [trackerId], onDelete: Cascade)
 
+  @@unique([trackerId, recordedAt], map: "unique_point_tracker_time")
   @@index([trackerId, recordedAt], map: "idx_location_tracker_time")
   @@map("location_points")
 }
@@ -65,6 +80,7 @@ model TripHistory {
 
   totalDistance Float?    @default(0) @map("total_distance")
   averageSpeed  Float?    @default(0) @map("average_speed")
+  maxSpeed      Float?    @default(0) @map("max_speed")
 
   // PostGIS geometry(LineString, 4326)
   route         Unsupported("geometry(LineString, 4326)")?
@@ -74,4 +90,94 @@ model TripHistory {
   @@unique([trackerId, tripDate], map: "unique_tracker_trip_date")
   @@index([trackerId, tripDate], map: "idx_trip_tracker_date")
   @@map("trip_history")
+}
+
+// The tables below are created in prisma/sql/*.sql.
+
+model Alert {
+  alertId    BigInt    @id @default(autoincrement()) @map("alert_id")
+  trackerId  String    @map("tracker_id") @db.VarChar(100)
+
+  // 'crash' or 'geofence'; new alert types only need a new value here
+  type       String    @db.VarChar(20)
+  message    String
+
+  longitude  Float?
+  latitude   Float?
+  speed      Float?
+  recordedAt DateTime  @map("recorded_at") @db.Timestamp(6)
+
+  geofenceId BigInt?   @map("geofence_id")
+
+  isResolved Boolean   @default(false) @map("is_resolved")
+  resolvedAt DateTime? @map("resolved_at") @db.Timestamp(6)
+  resolvedBy String?   @map("resolved_by") @db.VarChar(150)
+
+  // PostGIS geometry(Point, 4326)
+  location   Unsupported("geometry(Point, 4326)")?
+
+  tracker    Tracker   @relation(fields: [trackerId], references: [trackerId], onDelete: Cascade)
+  geofence   Geofence? @relation(fields: [geofenceId], references: [geofenceId], onDelete: SetNull)
+
+  @@index([trackerId, recordedAt(sort: Desc)], map: "idx_alert_tracker_time")
+  @@map("alerts")
+}
+
+model Geofence {
+  geofenceId   BigInt   @id @default(autoincrement()) @map("geofence_id")
+  trackerId    String   @map("tracker_id") @db.VarChar(100)
+
+  name         String   @db.VarChar(100)
+  description  String?
+  color        String   @default("#3b82f6") @db.VarChar(20)
+  alertOnEnter Boolean  @default(true) @map("alert_on_enter")
+  alertOnExit  Boolean  @default(true) @map("alert_on_exit")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+
+  // PostGIS geometry(Polygon, 4326)
+  area         Unsupported("geometry(Polygon, 4326)")
+
+  tracker      Tracker  @relation(fields: [trackerId], references: [trackerId], onDelete: Cascade)
+  alerts       Alert[]
+
+  @@index([trackerId], map: "idx_geofence_tracker")
+  @@map("geofences")
+}
+
+model TrackerShare {
+  shareId      BigInt   @id @default(autoincrement()) @map("share_id")
+  trackerId    String   @map("tracker_id") @db.VarChar(100)
+  viewerUserId Int      @map("viewer_user_id")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+
+  tracker      Tracker  @relation(fields: [trackerId], references: [trackerId], onDelete: Cascade)
+  viewer       User     @relation(fields: [viewerUserId], references: [userId], onDelete: Cascade)
+
+  @@unique([trackerId, viewerUserId], map: "unique_tracker_viewer")
+  @@index([viewerUserId], map: "idx_share_viewer")
+  @@map("tracker_shares")
+}
+
+model UserSettings {
+  userId         Int      @id @map("user_id")
+  crashAlerts    Boolean  @default(true) @map("crash_alerts")
+  geofenceAlerts Boolean  @default(true) @map("geofence_alerts")
+  theme          String   @default("dark") @db.VarChar(20)
+  speedUnit      String   @default("km/h") @map("speed_unit") @db.VarChar(10)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  user           User     @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+model FirmwareRelease {
+  version    String   @id @db.VarChar(32)
+  filename   String   @unique @db.VarChar(64)
+  size       Int
+  sha256     String   @db.Char(64)
+  data       Bytes
+  uploadedAt DateTime @default(now()) @map("uploaded_at") @db.Timestamp(6)
+
+  @@map("firmware_releases")
 }

@@ -2,11 +2,14 @@ import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { NextResponse } from "next/server";
+import { ADMIN_EMAIL } from "@/lib/auth";
 
 export async function POST(req: Request) {
   try {
-    const { email, password } = await req.json();
-    
+    const body = await req.json();
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    const password = body.password;
+
     if (!email || !password) {
       return NextResponse.json(
         { message: "Email and password are required" },
@@ -25,7 +28,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const isValidPassword = await bcrypt.compare(password, user.passwordHash);
+    const isValidPassword = await bcrypt.compare(String(password), user.passwordHash);
 
     if (!isValidPassword) {
       return NextResponse.json(
@@ -49,7 +52,7 @@ export async function POST(req: Request) {
         id: String(user.userId),
         email: user.email,
         name: user.username,
-        role: user.email === "admin@fleettrack.com" ? "admin" : "customer",
+        role: user.email === ADMIN_EMAIL ? "ADMIN" : "USER",
       },
     });
 

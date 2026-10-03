@@ -1,0 +1,19 @@
+# Render blueprint for the K-Track backend (backend/tracker-api.js).
+# The dashboard (this repo's Next.js app) is deployed on Vercel.
+services:
+  - type: web
+    name: k-track-api
+    runtime: node
+    rootDir: backend
+    # Singapore is usually better connected from Pakistan than the other regions.
+    region: singapore
+    buildCommand: npm install
+    startCommand: node tracker-api.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL # the Neon connection string, same as on Vercel
+        sync: false
+      - key: JWT_SECRET # same value as on Vercel
+        sync: false
+      - key: FRONTEND_ORIGIN # e.g. https://<your-app>.vercel.app
+        sync: false

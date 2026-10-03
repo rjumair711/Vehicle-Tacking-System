@@ -2,23 +2,45 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { useAuth } from '@/lib/authContext';
-import { generateMockGeofences } from '@/lib/mockData';
-import { Geofence } from '@/types';
+import { apiFetch, fetchGeofences, fetchTrackers, useApiData } from '@/lib/api';
+import { Geofence, TrackingDevice } from '@/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Plus, Edit2, Trash2 } from 'lucide-react';
+import { Plus, Edit2, Trash2, Undo2 } from 'lucide-react';
+
+const GeofenceMap = dynamic(
+  () => import('@/components/GeofenceMap').then((m) => m.GeofenceMap),
+  { ssr: false }
+);
+
+type Point = { lat: number; lng: number };
+
+interface GeofenceFormData {
+  trackerId: string;
+  name: string;
+  description: string;
+  color: string;
+  alertOnEnter: boolean;
+  alertOnExit: boolean;
+  points: Point[];
+}
 
 export default function GeofencesPage() {
   const router = useRouter();
-  const { user, checkPermission, isLoading } = useAuth();
-  const [geofences, setGeofences] = useState<Geofence[]>([]);
-  const [selectedGeofence, setSelectedGeofence] = useState<Geofence | null>(null);
+  const { user, isLoading } = useAuth();
+
+  const { data: geofences, loading, error, refresh } = useApiData<Geofence[]>(fetchGeofences, []);
+  const { data: allTrackers } = useApiData<TrackingDevice[]>(fetchTrackers, []);
+
+  const [editing, setEditing] = useState<Geofence | null>(null);
   const [isSheetOpen, setIsSheetOpen] = useState(false);
-  const [isCreateMode, setIsCreateMode] = useState(false);
+  const [actionError, setActionError] = useState('');
+  const [formError, setFormError] = useState('');
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -26,61 +48,83 @@ export default function GeofencesPage() {
     }
   }, [isLoading, user, router]);
 
-  useEffect(() => {
-    setGeofences(generateMockGeofences());
-  }, []);
-
   if (isLoading || !user) return null;
 
-  const handleAddGeofence = () => {
-    setSelectedGeofence(null);
-    setIsCreateMode(true);
+  // A zone can only be put on a vehicle the user owns, not one shared with them.
+  const trackers = allTrackers.filter((tracker) => !tracker.shared);
+
+  const openEditor = (geofence: Geofence | null) => {
+    setEditing(geofence);
+    setFormError('');
     setIsSheetOpen(true);
   };
 
-  const handleEditGeofence = (geofence: Geofence) => {
-    setSelectedGeofence(geofence);
-    setIsCreateMode(false);
-    setIsSheetOpen(true);
-  };
+  const handleDeleteGeofence = async (geofence: Geofence) => {
+    if (!window.confirm(`Delete geofence "${geofence.name}"?`)) return;
 
-  const handleDeleteGeofence = (id: string) => {
-    setGeofences((prev) => prev.filter((g) => g.id !== id));
-  };
-
-  const handleSaveGeofence = (data: any) => {
-    if (isCreateMode) {
-      const newGeofence: Geofence = {
-        id: `geo-${Date.now()}`,
-        createdAt: new Date(),
-        companyId: 'company-001',
-        ...data,
-      };
-      setGeofences((prev) => [...prev, newGeofence]);
-    } else if (selectedGeofence) {
-      setGeofences((prev) =>
-        prev.map((g) => (g.id === selectedGeofence.id ? { ...g, ...data } : g))
-      );
+    try {
+      setActionError('');
+      await apiFetch(`/api/geofences/${geofence.id}`, { method: 'DELETE' });
+      refresh();
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to delete geofence');
     }
-    setIsSheetOpen(false);
   };
 
-  const canManageGeofences = checkPermission('ADMIN');
+  const handleSaveGeofence = async (data: GeofenceFormData) => {
+    try {
+      setFormError('');
+
+      await apiFetch(editing ? `/api/geofences/${editing.id}` : '/api/geofences', {
+        method: editing ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+
+      setIsSheetOpen(false);
+      refresh();
+    } catch (err: any) {
+      setFormError(err?.message || 'Failed to save geofence');
+    }
+  };
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Geofences</h1>
-          <p className="mt-2 text-muted-foreground">Set up and manage virtual boundaries</p>
+          <p className="mt-2 text-muted-foreground">
+            Draw a zone for a vehicle and get an alert when it enters or leaves
+          </p>
         </div>
-        {canManageGeofences && (
-          <Button onClick={handleAddGeofence}>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Geofence
-          </Button>
-        )}
+        <Button onClick={() => openEditor(null)} disabled={trackers.length === 0}>
+          <Plus className="mr-2 h-4 w-4" />
+          Add Geofence
+        </Button>
       </div>
+
+      {(error || actionError) && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error || actionError}
+        </div>
+      )}
+
+      {!loading && !error && geofences.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          {trackers.length === 0
+            ? 'You need a tracker before you can add a geofence.'
+            : 'No geofences yet. Use Add Geofence to draw the first zone.'}
+        </p>
+      )}
+
+      {/* All zones on one map */}
+      {geofences.length > 0 && (
+        <Card className="border-border bg-card">
+          <CardContent className="h-[45vh] p-0 overflow-hidden rounded-xl">
+            <GeofenceMap key={geofences.map((g) => g.id).join('-')} geofences={geofences} />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Geofences List */}
       <div className="grid gap-4">
@@ -95,64 +139,30 @@ export default function GeofencesPage() {
                   />
                   <div>
                     <CardTitle className="text-lg">{geofence.name}</CardTitle>
-                    {geofence.description && (
-                      <CardDescription>{geofence.description}</CardDescription>
-                    )}
+                    <CardDescription>
+                      {geofence.trackerName ?? geofence.trackerId}
+                      {geofence.description ? ` · ${geofence.description}` : ''}
+                    </CardDescription>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge variant={geofence.type === 'inclusion' ? 'default' : 'destructive'}>
-                    {geofence.type === 'inclusion' ? 'Inclusion' : 'Exclusion'}
-                  </Badge>
-                  {canManageGeofences && (
-                    <>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleEditGeofence(geofence)}
-                      >
-                        <Edit2 className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDeleteGeofence(geofence.id)}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </>
-                  )}
+                  <Button variant="ghost" size="sm" onClick={() => openEditor(geofence)}>
+                    <Edit2 className="h-4 w-4" />
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => handleDeleteGeofence(geofence)}>
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </Button>
                 </div>
               </div>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {/* Location */}
-                <div className="rounded-lg border border-border bg-muted/50 p-3">
-                  <p className="text-xs font-semibold text-muted-foreground mb-1">Center Location</p>
-                  <p className="text-sm font-mono text-foreground">
-                    {geofence.center.lat.toFixed(4)}, {geofence.center.lng.toFixed(4)}
-                  </p>
-                </div>
-
-                {/* Radius */}
-                <div className="rounded-lg border border-border bg-muted/50 p-3">
-                  <p className="text-xs font-semibold text-muted-foreground mb-1">Radius</p>
-                  <p className="text-sm font-medium text-foreground">{geofence.radius} meters</p>
-                </div>
-
-                {/* Alerts */}
-                <div className="sm:col-span-2">
-                  <p className="text-xs font-semibold text-muted-foreground mb-2">Alert Settings</p>
-                  <div className="flex flex-wrap gap-2">
-                    {geofence.alertOnEnter && (
-                      <Badge variant="outline">Alert on Entry</Badge>
-                    )}
-                    {geofence.alertOnExit && (
-                      <Badge variant="outline">Alert on Exit</Badge>
-                    )}
-                  </div>
-                </div>
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="secondary">{geofence.points.length} corners</Badge>
+                {geofence.alertOnEnter && <Badge variant="outline">Alert on Entry</Badge>}
+                {geofence.alertOnExit && <Badge variant="outline">Alert on Exit</Badge>}
+                {!geofence.alertOnEnter && !geofence.alertOnExit && (
+                  <Badge variant="outline">No alerts</Badge>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -163,37 +173,27 @@ export default function GeofencesPage() {
       <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
         <SheetContent
           side="bottom"
-          className="h-[85vh] max-h-[85vh] sm:max-w-2xl mx-auto flex flex-col overflow-hidden"
+          className="h-[92vh] max-h-[92vh] sm:max-w-3xl mx-auto flex flex-col overflow-hidden"
         >
-          {!isCreateMode && selectedGeofence ? (
-            <>
-              <SheetHeader className="px-5 pr-14">
-                <SheetTitle>Edit Geofence</SheetTitle>
-                <SheetDescription>Modify geofence settings</SheetDescription>
-              </SheetHeader>
-              <div className="flex-1 overflow-y-auto px-5 pb-8">
-                <GeofenceForm
-                  geofence={selectedGeofence}
-                  onSave={handleSaveGeofence}
-                  onClose={() => setIsSheetOpen(false)}
-                />
-              </div>
-            </>
-          ) : (
-            <>
-              <SheetHeader>
-                <SheetTitle>Create Geofence</SheetTitle>
-                <SheetDescription>Set up a new virtual boundary</SheetDescription>
-              </SheetHeader>
-              <div className="flex-1 overflow-y-auto px-5 pb-8">
-                <GeofenceForm
-                  geofence={selectedGeofence ?? undefined}
-                  onSave={handleSaveGeofence}
-                  onClose={() => setIsSheetOpen(false)}
-                />
-              </div>
-            </>
-          )}
+          <SheetHeader className="px-5 pr-14">
+            <SheetTitle>{editing ? 'Edit Geofence' : 'Create Geofence'}</SheetTitle>
+            <SheetDescription>
+              Click the map to place each corner of the zone, going around its edge
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto px-5 pb-8">
+            {isSheetOpen && (
+              <GeofenceForm
+                key={editing?.id ?? 'new'}
+                geofence={editing ?? undefined}
+                trackers={trackers}
+                otherGeofences={geofences.filter((g) => g.id !== editing?.id)}
+                error={formError}
+                onSave={handleSaveGeofence}
+                onClose={() => setIsSheetOpen(false)}
+              />
+            )}
+          </div>
         </SheetContent>
       </Sheet>
     </div>
@@ -202,89 +202,139 @@ export default function GeofencesPage() {
 
 interface GeofenceFormProps {
   geofence?: Geofence;
-  onSave: (data: any) => void;
+  trackers: TrackingDevice[];
+  otherGeofences: Geofence[];
+  error: string;
+  onSave: (data: GeofenceFormData) => Promise<void>;
   onClose: () => void;
 }
 
-function GeofenceForm({ geofence, onSave, onClose }: GeofenceFormProps) {
-  const [formData, setFormData] = useState({
+function GeofenceForm({ geofence, trackers, otherGeofences, error, onSave, onClose }: GeofenceFormProps) {
+  const [formData, setFormData] = useState<GeofenceFormData>({
+    trackerId: geofence?.trackerId || trackers[0]?.trackerId || '',
     name: geofence?.name || '',
     description: geofence?.description || '',
-    radius: geofence?.radius || 500,
-    type: geofence?.type || 'inclusion',
     color: geofence?.color || '#3b82f6',
-    alertOnEnter: geofence?.alertOnEnter || false,
-    alertOnExit: geofence?.alertOnExit || false,
+    alertOnEnter: geofence?.alertOnEnter ?? true,
+    alertOnExit: geofence?.alertOnExit ?? true,
+    points: geofence?.points || [],
   });
+  const [isSaving, setIsSaving] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const selectedTracker = trackers.find((t) => t.trackerId === formData.trackerId);
+  const canSave = formData.points.length >= 3 && formData.name.trim() !== '' && formData.trackerId !== '';
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({
-      ...formData,
-      center: geofence?.center || { lat: 37.7749, lng: -122.4194 },
-    });
+    if (!canSave) return;
+
+    setIsSaving(true);
+    await onSave(formData);
+    setIsSaving(false);
   };
 
   return (
-    <form onSubmit={handleSubmit} className="mt-6 space-y-4 pb-6">
-      <div>
-        <label className="text-sm font-medium text-foreground">Geofence Name</label>
-        <Input
-          value={formData.name}
-          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-          placeholder="e.g., Downtown Office"
-          required
-          className="mt-1"
-        />
-      </div>
-
-      <div>
-        <label className="text-sm font-medium text-foreground">Description</label>
-        <Input
-          value={formData.description}
-          onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-          placeholder="Optional description"
-          className="mt-1"
-        />
-      </div>
+    <form onSubmit={handleSubmit} className="mt-2 space-y-4 pb-6">
+      {error && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </div>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <label className="text-sm font-medium text-foreground">Radius (meters)</label>
+          <label className="text-sm font-medium text-foreground">Geofence Name</label>
           <Input
-            type="number"
-            value={formData.radius}
-            onChange={(e) => setFormData({ ...formData, radius: parseInt(e.target.value) })}
-            min="100"
-            max="10000"
-            step="100"
+            value={formData.name}
+            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            placeholder="e.g., Home, Office, City limits"
+            required
             className="mt-1"
           />
         </div>
 
         <div>
-          <label className="text-sm font-medium text-foreground">Type</label>
+          <label className="text-sm font-medium text-foreground">Vehicle</label>
           <select
-            value={formData.type}
-            onChange={(e) => setFormData({ ...formData, type: e.target.value as any })}
+            value={formData.trackerId}
+            onChange={(e) => setFormData({ ...formData, trackerId: e.target.value })}
             className="mt-1 w-full rounded-lg border border-border bg-input px-3 py-2 text-foreground"
           >
-            <option value="inclusion">Inclusion Zone</option>
-            <option value="exclusion">Exclusion Zone</option>
+            {trackers.map((tracker) => (
+              <option key={tracker.trackerId} value={tracker.trackerId}>
+                {tracker.name ?? tracker.trackerId}
+                {tracker.licensePlate ? ` (${tracker.licensePlate})` : ''}
+              </option>
+            ))}
           </select>
         </div>
       </div>
 
       <div>
-        <label className="text-sm font-medium text-foreground">Color</label>
-        <div className="mt-1 flex items-center gap-2">
-          <input
-            type="color"
-            value={formData.color}
-            onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-            className="h-10 w-14 rounded-lg border border-border cursor-pointer"
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-medium text-foreground">
+            Zone ({formData.points.length} {formData.points.length === 1 ? 'corner' : 'corners'})
+          </label>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={formData.points.length === 0}
+              onClick={() => setFormData({ ...formData, points: formData.points.slice(0, -1) })}
+            >
+              <Undo2 className="mr-1 h-4 w-4" />
+              Undo
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={formData.points.length === 0}
+              onClick={() => setFormData({ ...formData, points: [] })}
+            >
+              Clear
+            </Button>
+          </div>
+        </div>
+        <div className="mt-2 h-[42vh] overflow-hidden rounded-lg border border-border">
+          <GeofenceMap
+            geofences={otherGeofences}
+            drawing={formData.points}
+            drawingColor={formData.color}
+            onDrawingChange={(points) => setFormData((prev) => ({ ...prev, points }))}
+            fallbackCenter={selectedTracker?.location}
           />
-          <span className="text-sm text-muted-foreground">{formData.color}</span>
+        </div>
+        {formData.points.length < 3 && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            Place at least 3 corners to make a zone.
+          </p>
+        )}
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label className="text-sm font-medium text-foreground">Description</label>
+          <Input
+            value={formData.description}
+            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+            placeholder="Optional description"
+            className="mt-1"
+          />
+        </div>
+
+        <div>
+          <label className="text-sm font-medium text-foreground">Color</label>
+          <div className="mt-1 flex items-center gap-2">
+            <input
+              type="color"
+              value={formData.color}
+              onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+              className="h-10 w-14 rounded-lg border border-border cursor-pointer"
+            />
+            <span className="text-sm text-muted-foreground">{formData.color}</span>
+          </div>
         </div>
       </div>
 
@@ -298,7 +348,7 @@ function GeofenceForm({ geofence, onSave, onClose }: GeofenceFormProps) {
               onChange={(e) => setFormData({ ...formData, alertOnEnter: e.target.checked })}
               className="rounded border-border"
             />
-            <span className="text-sm text-foreground">Alert when vehicle enters</span>
+            <span className="text-sm text-foreground">Alert when the vehicle enters</span>
           </label>
           <label className="flex items-center gap-2 cursor-pointer">
             <input
@@ -307,7 +357,7 @@ function GeofenceForm({ geofence, onSave, onClose }: GeofenceFormProps) {
               onChange={(e) => setFormData({ ...formData, alertOnExit: e.target.checked })}
               className="rounded border-border"
             />
-            <span className="text-sm text-foreground">Alert when vehicle exits</span>
+            <span className="text-sm text-foreground">Alert when the vehicle leaves</span>
           </label>
         </div>
       </div>
@@ -316,8 +366,8 @@ function GeofenceForm({ geofence, onSave, onClose }: GeofenceFormProps) {
         <Button type="button" variant="outline" onClick={onClose} className="flex-1">
           Cancel
         </Button>
-        <Button type="submit" className="flex-1">
-          {geofence ? 'Update' : 'Create'} Geofence
+        <Button type="submit" className="flex-1" disabled={!canSave || isSaving}>
+          {isSaving ? 'Saving...' : geofence ? 'Update Geofence' : 'Create Geofence'}
         </Button>
       </div>
     </form>

@@ -1,35 +1,29 @@
-import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
+import { getSession, unauthorized } from "@/lib/auth";
+import { getTrip, listTrips } from "@/lib/trips";
 
-export async function GET() {
+export const dynamic = "force-dynamic";
+
+// GET /api/trips            -> trip list (no routes; today's trip is "active")
+// GET /api/trips?tripId=X   -> one trip with its route as GeoJSON
+export async function GET(req: Request) {
+  const session = await getSession();
+  if (!session) return unauthorized();
+
   try {
-    const trips = await prisma.$queryRaw`
-      SELECT
-        th.trip_id,
-        th.tracker_id,
-        t.name,
-        t.license_plate,
-        th.trip_date,
-        th.start_time,
-        th.end_time,
-        th.total_distance,
-        th.average_speed,
-        ST_AsGeoJSON(th.route) AS route_geojson
-      FROM trip_history th
-      JOIN trackers t ON t.tracker_id = th.tracker_id
-      ORDER BY th.trip_date DESC, th.start_time DESC;
-    `;
+    const tripId = new URL(req.url).searchParams.get("tripId");
 
-    return NextResponse.json({
-      success: true,
-      trips,
-    });
+    if (tripId) {
+      const trip = await getTrip(session, tripId);
+      if (!trip) {
+        return NextResponse.json({ message: "Trip not found" }, { status: 404 });
+      }
+      return NextResponse.json({ success: true, trip });
+    }
+
+    return NextResponse.json({ success: true, trips: await listTrips(session) });
   } catch (error) {
     console.error("Fetch trips error:", error);
-
-    return NextResponse.json(
-      { message: "Failed to fetch trips" },
-      { status: 500 }
-    );
+    return NextResponse.json({ message: "Failed to fetch trips" }, { status: 500 });
   }
 }

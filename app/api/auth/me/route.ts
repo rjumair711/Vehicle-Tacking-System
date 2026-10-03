@@ -1,27 +1,26 @@
 import { prisma } from '@/lib/prisma';
-import jwt from 'jsonwebtoken';
-import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
+import { getSession } from '@/lib/auth';
+import { getUserSettings } from '@/lib/settings';
+import { getUserRole } from '@/lib/trackers';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
     try {
-        const cookieStore = await cookies();
-        const token = cookieStore.get('token')?.value;
+        const session = await getSession();
 
-        if (!token) {
+        if (!session) {
             return NextResponse.json({ user: null }, { status: 401 });
         }
 
-        const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
-            userId: string;
-        };
-
         const user = await prisma.user.findUnique({
-            where: { userId: Number(decoded.userId) },
+            where: { userId: session.userId },
             select: {
                 userId: true,
                 username: true,
                 email: true,
+                company: true,
             },
         });
 
@@ -29,12 +28,16 @@ export async function GET() {
             return NextResponse.json({ user: null }, { status: 401 });
         }
 
+        const settings = await getUserSettings(user.userId);
+
         return NextResponse.json({
             user: {
                 id: String(user.userId),
                 email: user.email,
                 name: user.username,
-                role: user.email === "admin@fleettrack.com" ? "ADMIN" : "USER",
+                company: user.company,
+                role: await getUserRole(session),
+                speedUnit: settings.speedUnit,
             },
         });
     } catch (error) {

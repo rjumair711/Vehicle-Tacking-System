@@ -1,8 +1,7 @@
 'use client';
 
 import { useAuth } from '@/lib/authContext';
-
-type UserRole = 'ADMIN' | 'USER';
+import { UserRole } from '@/types';
 
 interface RoleGuardProps {
   allowedRoles: UserRole[];

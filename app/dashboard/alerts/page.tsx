@@ -2,17 +2,25 @@
 
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '@/lib/authContext';
-import { generateMockAlerts } from '@/lib/mockData';
+import { LIVE_REFRESH_MS, apiFetch, fetchAlerts, useApiData } from '@/lib/api';
+import { useRealtime } from '@/lib/realtime';
 import { Alert as AlertType } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { AlertTriangle, AlertCircle, CheckCircle, MapPin, Clock, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle, MapPin, Clock } from 'lucide-react';
 
 export default function AlertsPage() {
   const { user, isLoading } = useAuth();
-  const [alerts, setAlerts] = useState<AlertType[]>([]);
+  const { data: alerts, setData: setAlerts, loading, error, refresh } = useApiData<AlertType[]>(fetchAlerts, [], LIVE_REFRESH_MS);
+  const [trackerFilter, setTrackerFilter] = useState('all');
+
+  // A new crash or geofence alert shows up at once.
+  useRealtime((event) => {
+    if (event.type === 'alert') refresh();
+  });
+  const [actionError, setActionError] = useState('');
   const [selectedAlert, setSelectedAlert] = useState<AlertType | null>(null);
   const [isSheetOpen, setIsSheetOpen] = useState(false);
 
@@ -22,20 +30,12 @@ export default function AlertsPage() {
     }
   }, [isLoading, user]);
 
-  useEffect(() => {
-    setAlerts(generateMockAlerts());
-  }, []);
-
   if (isLoading || !user) return null;
 
   const getAlertIcon = (type: AlertType['type']) => {
     switch (type) {
-      case 'speeding':
-        return <AlertTriangle className="h-5 w-5" />;
       case 'geofence':
         return <MapPin className="h-5 w-5" />;
-      case 'offline':
-        return <AlertCircle className="h-5 w-5" />;
       default:
         return <AlertTriangle className="h-5 w-5" />;
     }
@@ -45,33 +45,44 @@ export default function AlertsPage() {
     switch (priority) {
       case 'critical':
         return 'destructive';
-      case 'high':
-        return 'destructive';
       case 'medium':
         return 'secondary';
-      case 'low':
-        return 'outline';
       default:
         return 'outline';
     }
   };
 
-  const unresolved = alerts.filter((a) => !a.isResolved);
-  const resolved = alerts.filter((a) => a.isResolved);
+  // Trackers that have at least one alert, for the filter.
+  const alertTrackers = Array.from(
+    new Map(alerts.map((a) => [a.trackerId, a.trackerName ?? a.trackerId])).entries()
+  );
+  const visibleAlerts =
+    trackerFilter === 'all' ? alerts : alerts.filter((a) => a.trackerId === trackerFilter);
 
-  const handleResolveAlert = (alertId: string) => {
-    setAlerts((prev) =>
-      prev.map((alert) =>
-        alert.id === alertId
-          ? {
-            ...alert,
-            isResolved: true,
-            resolvedAt: new Date(),
-            resolvedBy: user?.email,
-          }
-          : alert
-      )
-    );
+  const unresolved = visibleAlerts.filter((a) => !a.isResolved);
+  const resolved = visibleAlerts.filter((a) => a.isResolved);
+
+  const handleResolveAlert = async (alertId: string) => {
+    try {
+      setActionError('');
+      await apiFetch(`/api/alerts/${alertId}`, { method: 'PATCH' });
+
+      setAlerts((prev) =>
+        prev.map((alert) =>
+          alert.id === alertId
+            ? {
+              ...alert,
+              isResolved: true,
+              resolvedAt: new Date(),
+              resolvedBy: user?.email,
+            }
+            : alert
+        )
+      );
+    } catch (err: any) {
+      setActionError(err?.message || 'Failed to resolve alert');
+      refresh();
+    }
   };
 
   return (
@@ -80,6 +91,39 @@ export default function AlertsPage() {
         <h1 className="text-3xl font-bold text-foreground">Alerts</h1>
         <p className="mt-2 text-muted-foreground">Vehicle incidents and notifications</p>
       </div>
+
+      {(error || actionError) && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error || actionError}
+        </div>
+      )}
+
+      {!loading && !error && alerts.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          No alerts. Crash and geofence alerts from your trackers appear here.
+        </p>
+      )}
+
+      {alertTrackers.length > 0 && (
+        <div className="flex items-center gap-2">
+          <label htmlFor="trackerFilter" className="text-sm text-muted-foreground">
+            Vehicle
+          </label>
+          <select
+            id="trackerFilter"
+            value={trackerFilter}
+            onChange={(e) => setTrackerFilter(e.target.value)}
+            className="rounded-lg border border-border bg-input px-3 py-2 text-sm text-foreground"
+          >
+            <option value="all">All vehicles</option>
+            {alertTrackers.map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid gap-4 sm:grid-cols-3">

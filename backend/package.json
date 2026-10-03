@@ -1,0 +1,19 @@
+{
+  "name": "k-track-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "K-Track tracker ingest, OTA host and live push (runs on Render)",
+  "main": "tracker-api.js",
+  "scripts": {
+    "start": "node tracker-api.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.13.1",
+    "ws": "^8.18.0"
+  }
+}

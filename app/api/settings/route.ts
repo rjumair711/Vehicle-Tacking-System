@@ -1,88 +1,45 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
-import jwt from 'jsonwebtoken';
+import { NextResponse } from 'next/server';
+import { getSession, unauthorized } from '@/lib/auth';
+import {
+  SPEED_UNITS,
+  THEMES,
+  getUserSettings,
+  saveUserSettings,
+} from '@/lib/settings';
 
-function getUserFromRequest(req: NextRequest) {
-  const token = req.cookies.get('token')?.value;
-  if (!token) return null;
+export const dynamic = 'force-dynamic';
+
+export async function GET() {
+  const session = await getSession();
+  if (!session) return unauthorized();
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
-      userId: string;
-      email: string;
-      role: string;
-      name: string;
-    };
-    return decoded;
-  } catch {
-    return null;
-  }
-}
-
-export async function GET(req: NextRequest) {
-  try {
-    const authUser = getUserFromRequest(req);
-    if (!authUser) {
-      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
-    }
-
-    let settings = await prisma.userSettings.findUnique({
-      where: { userId: authUser.userId },
-    });
-
-    if (!settings) {
-      settings = await prisma.userSettings.create({
-        data: {
-          userId: authUser.userId,
-        },
-      });
-    }
-
-    return NextResponse.json(settings);
+    return NextResponse.json(await getUserSettings(session.userId));
   } catch (error) {
     console.error('GET /api/settings error:', error);
     return NextResponse.json({ message: 'Failed to load settings' }, { status: 500 });
   }
 }
 
-export async function PUT(req: NextRequest) {
+export async function PUT(req: Request) {
+  const session = await getSession();
+  if (!session) return unauthorized();
+
   try {
-    const authUser = getUserFromRequest(req);
-    if (!authUser) {
-      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await req.json();
+    const current = await getUserSettings(session.userId);
 
-    const updated = await prisma.userSettings.upsert({
-      where: { userId: authUser.userId },
-      update: {
-        emailAlerts: body.emailAlerts,
-        speedingAlerts: body.speedingAlerts,
-        geofenceAlerts: body.geofenceAlerts,
-        maintenanceAlerts: body.maintenanceAlerts,
-        offlineAlerts: body.offlineAlerts,
-        theme: body.theme,
-        speedUnit: body.speedUnit,
-        temperatureUnit: body.temperatureUnit,
-      },
-      create: {
-        userId: authUser.userId,
-        emailAlerts: body.emailAlerts,
-        speedingAlerts: body.speedingAlerts,
-        geofenceAlerts: body.geofenceAlerts,
-        maintenanceAlerts: body.maintenanceAlerts,
-        offlineAlerts: body.offlineAlerts,
-        theme: body.theme,
-        speedUnit: body.speedUnit,
-        temperatureUnit: body.temperatureUnit,
-      },
-    });
+    const settings = {
+      crashAlerts: typeof body.crashAlerts === 'boolean' ? body.crashAlerts : current.crashAlerts,
+      geofenceAlerts:
+        typeof body.geofenceAlerts === 'boolean' ? body.geofenceAlerts : current.geofenceAlerts,
+      theme: THEMES.includes(body.theme) ? body.theme : current.theme,
+      speedUnit: SPEED_UNITS.includes(body.speedUnit) ? body.speedUnit : current.speedUnit,
+    };
 
-    return NextResponse.json({
-      message: 'Settings saved successfully',
-      settings: updated,
-    });
+    await saveUserSettings(session.userId, settings);
+
+    return NextResponse.json({ message: 'Settings saved successfully', settings });
   } catch (error) {
     console.error('PUT /api/settings error:', error);
     return NextResponse.json({ message: 'Failed to save settings' }, { status: 500 });

@@ -3,20 +3,24 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/authContext';
-import { generateMockTrips, generateMockTrackers } from '@/lib/mockData';
-import { TrackingDevice, Trip } from '@/types';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { fetchTrips, formatSpeed, useApiData } from '@/lib/api';
+import { Trip } from '@/types';
 import { Badge } from '@/components/ui/badge';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Gauge, MapPin, Clock, Navigation2 } from 'lucide-react';
+import { Gauge, Clock, Navigation2 } from 'lucide-react';
+
+type TripFilter = 'all' | 'active' | 'completed';
+
+const filters: { id: TripFilter; label: string }[] = [
+  { id: 'all', label: 'All Trips' },
+  { id: 'active', label: 'Active Trips' },
+  { id: 'completed', label: 'Completed' },
+];
 
 export default function TripsPage() {
   const router = useRouter();
   const { user, isLoading } = useAuth();
-  const [trips, setTrips] = useState<Trip[]>([]);
-  const [trackers, setTrackers] = useState<TrackingDevice[]>([]);
-  const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
-  const [isSheetOpen, setIsSheetOpen] = useState(false);
+  const { data: trips, loading, error } = useApiData<Trip[]>(fetchTrips, [], 30000);
+  const [filter, setFilter] = useState<TripFilter>('all');
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -24,15 +28,10 @@ export default function TripsPage() {
     }
   }, [isLoading, user, router]);
 
-  useEffect(() => {
-    setTrips(generateMockTrips());
-    setTrackers(generateMockTrackers());
-  }, []);
-
   if (isLoading || !user) return null;
 
   const formatTime = (date: Date) => date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  const formatDate = (date: Date) => date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const formatDate = (date: Date) => date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   const formatDuration = (minutes: number) => {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
@@ -40,43 +39,66 @@ export default function TripsPage() {
   };
 
   const openTripOnMap = (trip: Trip) => {
-    router.push(`/dashboard/map?tripId=${trip.id}&trackerId=${trip.trackerId}`);
+    router.push(
+      `/dashboard/map?tripId=${encodeURIComponent(trip.id)}&trackerId=${encodeURIComponent(trip.trackerId)}`
+    );
   };
+
+  const visibleTrips = trips.filter((trip) => filter === 'all' || trip.status === filter);
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
       <div>
         <h1 className="text-3xl font-bold text-foreground">Trips</h1>
-        <p className="mt-2 text-muted-foreground">Tracker trip history and analytics</p>
+        <p className="mt-2 text-muted-foreground">
+          One trip per tracker per day. Select a trip to see its route on the map.
+        </p>
       </div>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2">
-        <Badge variant="default">All Trips</Badge>
-        <Badge variant="outline">Active Trips</Badge>
-        <Badge variant="outline">Completed</Badge>
+        {filters.map((item) => (
+          <button key={item.id} onClick={() => setFilter(item.id)}>
+            <Badge variant={filter === item.id ? 'default' : 'outline'}>{item.label}</Badge>
+          </button>
+        ))}
       </div>
+
+      {error && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </div>
+      )}
+
+      {!loading && !error && visibleTrips.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          No trips yet. A trip appears here once a tracker has reported movement.
+        </p>
+      )}
 
       {/* Trips List */}
       <div className="space-y-3">
-        {trips.map((trip) => (
+        {visibleTrips.map((trip) => (
           <button
-            key={trip.id}
+            key={`${trip.id}-${trip.startTime.getTime()}`}
             onClick={() => openTripOnMap(trip)}
             className="w-full text-left rounded-lg border border-border bg-card hover:bg-muted transition-colors p-4"
           >
             <div className="grid gap-4 md:grid-cols-5">
               {/* Tracker Info */}
               <div className="md:col-span-1">
-                <p className="font-semibold text-foreground">{trip.trackerName}</p>
-                <p className="text-xs text-muted-foreground mt-1">{trip.trackerId}</p>
+                <p className="font-semibold text-foreground">{trip.trackerName ?? trip.trackerId}</p>
+                <p className="text-xs text-muted-foreground mt-1">{trip.licensePlate ?? trip.trackerId}</p>
               </div>
 
               {/* Time Info */}
               <div className="md:col-span-1">
                 <div className="flex items-center gap-1 text-xs">
                   <Clock className="h-4 w-4 text-primary" />
-                  <span className="text-foreground">{formatTime(trip.startTime)}</span>
+                  <span className="text-foreground">
+                    {formatTime(trip.startTime)}
+                    {trip.endTime ? ` – ${formatTime(trip.endTime)}` : ''}
+                  </span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">{formatDate(trip.startTime)}</p>
               </div>
@@ -85,7 +107,7 @@ export default function TripsPage() {
               <div className="md:col-span-1">
                 <div className="flex items-center gap-1 text-sm">
                   <Navigation2 className="h-4 w-4 text-primary" />
-                  <span className="font-medium text-foreground">{trip.distance} km</span>
+                  <span className="font-medium text-foreground">{trip.distance.toFixed(2)} km</span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">{formatDuration(trip.duration)}</p>
               </div>
@@ -94,9 +116,11 @@ export default function TripsPage() {
               <div className="md:col-span-1">
                 <div className="flex items-center gap-1 text-sm">
                   <Gauge className="h-4 w-4 text-primary" />
-                  <span className="text-foreground">{trip.averageSpeed} km/h</span>
+                  <span className="text-foreground">{formatSpeed(trip.averageSpeed, user.speedUnit)}</span>
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">avg</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  avg · max {formatSpeed(trip.maxSpeed, user.speedUnit)}
+                </p>
               </div>
 
               {/* Status */}
@@ -109,131 +133,6 @@ export default function TripsPage() {
           </button>
         ))}
       </div>
-
-      {/* Trip Details Sheet */}
-      <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
-        <SheetContent
-          side="bottom"
-          className="h-[85vh] max-h-[85vh] sm:max-w-2xl mx-auto flex flex-col overflow-hidden"
-        >
-          {selectedTrip ? (
-            <>
-              <SheetHeader className="px-5 pr-14 shrink-0">
-                <SheetTitle>{selectedTrip.trackerName}</SheetTitle>
-                <SheetDescription>Trip Details</SheetDescription>
-              </SheetHeader>
-
-              <div className="flex-1 overflow-y-auto px-5 pb-8">
-                <div className="mt-6 grid gap-4 md:grid-cols-2">
-                  {/* Trip Duration */}
-                  <Card className="border-border bg-muted/50">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Trip Duration</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-2xl font-bold text-foreground">
-                        {formatDuration(selectedTrip.duration)}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {formatTime(selectedTrip.startTime)} -{" "}
-                        {selectedTrip.endTime ? formatTime(selectedTrip.endTime) : "Ongoing"}
-                      </p>
-                    </CardContent>
-                  </Card>
-
-                  {/* Distance */}
-                  <Card className="border-border bg-muted/50">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="flex items-center gap-2 text-sm">
-                        <Navigation2 className="h-4 w-4" />
-                        Distance
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-2xl font-bold text-foreground">
-                        {selectedTrip.distance} km
-                      </p>
-                    </CardContent>
-                  </Card>
-
-                  {/* Average Speed */}
-                  <Card className="border-border bg-muted/50">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="flex items-center gap-2 text-sm">
-                        <Gauge className="h-4 w-4" />
-                        Average Speed
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-2xl font-bold text-foreground">
-                        {selectedTrip.averageSpeed} km/h
-                      </p>
-                    </CardContent>
-                  </Card>
-
-                  {/* Max Speed */}
-                  <Card className="border-border bg-muted/50">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Max Speed</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="text-2xl font-bold text-foreground">
-                        {selectedTrip.maxSpeed} km/h
-                      </p>
-                    </CardContent>
-                  </Card>
-
-                  {/* Start Location */}
-                  <Card className="border-border md:col-span-2">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="flex items-center gap-2 text-sm">
-                        <MapPin className="h-4 w-4" />
-                        Start Location
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <p className="font-mono text-sm text-foreground wrap-break-word">
-                        {selectedTrip.startLocation?.lat?.toFixed(4)},{" "}
-                        {selectedTrip.startLocation?.lng?.toFixed(4)}
-                      </p>
-                    </CardContent>
-                  </Card>
-
-                  {/* End Location */}
-                  {selectedTrip.endLocation && (
-                    <Card className="border-border md:col-span-2">
-                      <CardHeader className="pb-2">
-                        <CardTitle className="flex items-center gap-2 text-sm">
-                          <MapPin className="h-4 w-4" />
-                          End Location
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <p className="font-mono text-sm text-foreground wrap-break-word">
-                          {selectedTrip.endLocation.lat.toFixed(4)},{" "}
-                          {selectedTrip.endLocation.lng.toFixed(4)}
-                        </p>
-                      </CardContent>
-                    </Card>
-                  )}
-
-                  {/* Driver */}
-                  {selectedTrip.trackerName && (
-                    <Card className="border-border md:col-span-2">
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-sm">Driver</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <p className="text-foreground">{selectedTrip.trackerName}</p>
-                      </CardContent>
-                    </Card>
-                  )}
-                </div>
-              </div>
-            </>
-          ) : null}
-        </SheetContent>
-      </Sheet>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -114,6 +114,13 @@ function Recenter({
   routePoints?: RoutePoint[];
 }) {
   const map = useMap();
+  const hasFittedFleet = useRef(false);
+
+  const selectedLocation = vehicles.find(
+    (vehicle) => vehicle.trackerId === selectedVehicleId
+  )?.location;
+  const selectedLat = selectedLocation?.lat;
+  const selectedLng = selectedLocation?.lng;
 
   useEffect(() => {
     if (routePoints && routePoints.length > 0) {
@@ -128,18 +135,25 @@ function Recenter({
       return;
     }
 
-    const selectedVehicle = vehicles.find(
-      (vehicle) => vehicle.trackerId === selectedVehicleId
-    );
+    // Follow the selected tracker as its position changes.
+    if (selectedLat !== undefined && selectedLng !== undefined) {
+      map.setView([selectedLat, selectedLng], Math.max(map.getZoom(), 14), {
+        animate: true,
+      });
+      return;
+    }
 
-    if (selectedVehicle?.location) {
-      map.setView(
-        [selectedVehicle.location.lat, selectedVehicle.location.lng],
-        Math.max(map.getZoom(), 14),
-        { animate: true }
+    // Nothing selected: show the whole fleet once, when positions first arrive.
+    if (!hasFittedFleet.current && vehicles.length > 0) {
+      hasFittedFleet.current = true;
+      map.fitBounds(
+        L.latLngBounds(
+          vehicles.map((vehicle) => [vehicle.location!.lat, vehicle.location!.lng])
+        ),
+        { padding: [40, 40], maxZoom: 15 }
       );
     }
-  }, [vehicles, selectedVehicleId, routePoints, map]);
+  }, [vehicles.length, selectedLat, selectedLng, routePoints, map]);
 
   return null;
 }
@@ -168,12 +182,11 @@ export function VehicleMap({
         zoom={12}
         scrollWheelZoom
         className="h-full w-full"
-        attributionControl={false}
       >
         <FixMapSize />
 
         <TileLayer
-          attribution=""
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
@@ -233,7 +246,7 @@ export function VehicleMap({
                 <div className="text-xs">Status: {vehicle.status}</div>
 
                 <div className="text-xs">
-                  Speed: {vehicle.location?.speed ?? 0} km/h
+                  Speed: {(vehicle.location?.speed ?? 0).toFixed(0)} km/h
                 </div>
 
                 <div className="text-xs">

@@ -1,44 +1,25 @@
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { ADMIN_EMAIL, forbidden, getSession, unauthorized } from "@/lib/auth";
+
+export const dynamic = "force-dynamic";
 
 const createUserSchema = z.object({
-  username: z.string().min(2),
-  email: z.string().email(),
+  username: z.string().trim().min(2).max(100),
+  email: z.string().trim().toLowerCase().email().max(150),
   password: z.string().min(6),
+  company: z.string().trim().max(150).optional(),
 });
 
-async function getCurrentAdmin() {
-  try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get("token")?.value;
-    if (!token) return null;
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
-      userId: number;
-      email: string;
-    };
-
-    if (decoded.email !== "admin@fleettrack.com") return null;
-    return decoded;
-  } catch {
-    return null;   // ← handles expired/invalid token gracefully
-  }
-}
-
 export async function POST(req: Request) {
+  const session = await getSession();
+  if (!session) return unauthorized();
+  if (!session.isAdmin) return forbidden();
+
   try {
-    const admin = await getCurrentAdmin();
-
-    if (!admin) {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-    }
-
-    const body = await req.json();
-    const parsed = createUserSchema.safeParse(body);
+    const parsed = createUserSchema.safeParse(await req.json());
 
     if (!parsed.success) {
       return NextResponse.json(
@@ -47,32 +28,22 @@ export async function POST(req: Request) {
       );
     }
 
-    const { username, email, password } = parsed.data;
+    const { username, email, password, company } = parsed.data;
 
-    const existingUser = await prisma.user.findUnique({
-      where: { email },
-    });
+    const existingUser = await prisma.user.findUnique({ where: { email } });
 
     if (existingUser) {
-      return NextResponse.json(
-        { message: "User already exists" },
-        { status: 409 }
-      );
+      return NextResponse.json({ message: "User already exists" }, { status: 409 });
     }
-
-    const passwordHash = await bcrypt.hash(password, 10);
 
     const user = await prisma.user.create({
       data: {
         username,
         email,
-        passwordHash,
+        passwordHash: await bcrypt.hash(password, 10),
+        company: company || null,
       },
-      select: {
-        userId: true,
-        username: true,
-        email: true,
-      },
+      select: { userId: true, username: true, email: true, company: true },
     });
 
     return NextResponse.json(
@@ -82,33 +53,39 @@ export async function POST(req: Request) {
           id: String(user.userId),
           name: user.username,
           email: user.email,
+          company: user.company,
           role: "USER",
+          trackers: [],
         },
       },
       { status: 201 }
     );
   } catch (error) {
     console.error("Create user error:", error);
-    return NextResponse.json(
-      { message: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }
 
+// Admin: every customer with the trackers assigned to them.
 export async function GET() {
+  const session = await getSession();
+  if (!session) return unauthorized();
+  if (!session.isAdmin) return forbidden();
+
   try {
     const users = await prisma.user.findMany({
-      where: {
-        email: {
-          not: "admin@fleettrack.com",
-        },
-      },
+      where: { email: { not: ADMIN_EMAIL } },
       select: {
         userId: true,
         username: true,
         email: true,
+        company: true,
+        trackers: {
+          select: { trackerId: true, name: true, licensePlate: true },
+          orderBy: { trackerId: "asc" },
+        },
       },
+      orderBy: { userId: "asc" },
     });
 
     return NextResponse.json({
@@ -116,14 +93,13 @@ export async function GET() {
         id: String(user.userId),
         name: user.username,
         email: user.email,
+        company: user.company,
         role: "USER",
+        trackers: user.trackers,
       })),
     });
   } catch (error) {
     console.error("Fetch users error:", error);
-    return NextResponse.json(
-      { message: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }

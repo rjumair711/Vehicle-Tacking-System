@@ -1,65 +1,78 @@
 // Role-based access control
-export type UserRole = 'admin' | 'user';
+// ADMIN = fleet administrator, USER = vehicle owner,
+// VIEWER = invited viewer (live location of shared vehicles only)
+export type UserRole = 'ADMIN' | 'USER' | 'VIEWER';
 
-// User interface
+export type SpeedUnit = 'km/h' | 'mph' | 'm/s';
+
+// Logged-in user
 export interface User {
   id: string;
   email: string;
   name: string;
   role: UserRole;
-  company?: string;
-  avatar?: string;
+  company?: string | null;
+  speedUnit?: SpeedUnit;
 }
 
 // Customer management
+export interface CustomerTracker {
+  trackerId: string;
+  name?: string | null;
+  licensePlate?: string | null;
+}
+
 export interface Customer {
   id: string;
   name: string;
   email: string;
-  company: string;
-  phone?: string;
-  status: 'active' | 'inactive';
-  assignedTrackerIds: string[];
-  createdAt: Date;
+  company?: string | null;
+  trackers: CustomerTracker[];
 }
 
-// Tracker status
-export type TrackerStatus = 'active' | 'inactive' | 'error' | 'suspended';
+// online   = a record arrived in the last 90 seconds
+// offline  = nothing received recently (no power, no network or no GPS fix)
+// suspended = suspended by the admin; its records are rejected
+export type TrackerStatus = 'online' | 'offline' | 'suspended';
 
 // GPS location
 export interface Location {
   lat: number;
   lng: number;
-  timestamp: Date;
+  timestamp?: Date;
   speed?: number;
 }
 
 // Tracker / Device interface
 // Device = Vehicle + GPS Tracker in current simplified design
 export interface TrackingDevice {
-  id: string;
   trackerId: string;
 
   name?: string;
   licensePlate?: string;
 
   status: TrackerStatus;
-  battery?: number;
-  signalStrength?: number;
-  simCard?: string;
 
-  customerId?: string;
-  userId?: string;
+  // true when the vehicle belongs to someone else and is shared view-only
+  shared?: boolean;
 
-  lastPing?: Date;
+  customer?: {
+    id: string;
+    name: string;
+    email: string;
+  };
+
+  lastSeen?: Date;
+  createdAt?: Date;
   location?: Location;
 }
 
-// Trip history
+// Trip history: one trip per tracker per day. Today's trip is 'active'.
 export interface Trip {
   id: string;
   trackerId: string;
   trackerName?: string;
+  licensePlate?: string;
 
   startLocation?: Location;
   endLocation?: Location;
@@ -78,8 +91,8 @@ export interface Trip {
 }
 
 // Alert types
-export type AlertType = 'crash' | 'speeding' | 'geofence' | 'offline';
-export type AlertPriority = 'critical' | 'high' | 'medium' | 'low';
+export type AlertType = 'crash' | 'geofence';
+export type AlertPriority = 'critical' | 'medium';
 
 export interface Alert {
   id: string;
@@ -93,33 +106,32 @@ export interface Alert {
 
   timestamp: Date;
   location?: Location;
+  speed?: number;
 
   isResolved: boolean;
   resolvedAt?: Date;
   resolvedBy?: string;
 }
 
-// Geofence
+// Geofence: a polygon drawn on the map for one tracker
 export interface Geofence {
   id: string;
+  trackerId: string;
+  trackerName?: string | null;
   name: string;
   description?: string;
-  center: Location;
-  radius: number;
-  type: 'inclusion' | 'exclusion';
+  points: { lat: number; lng: number }[];
   color: string;
   alertOnEnter: boolean;
   alertOnExit: boolean;
-  companyId: string;
   createdAt: Date;
 }
 
-// Auth context
-export interface AuthContextType {
-  user: User | null;
-  isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  logout: () => Promise<void>;
-  refreshUser?: () => Promise<void>;
-  checkPermission: (requiredRole: UserRole) => boolean;
+// OTA firmware image
+export interface FirmwareRelease {
+  version: string;
+  filename: string;
+  size: number;
+  sha256: string;
+  uploadedAt: Date;
 }

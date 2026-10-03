@@ -2,14 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
-type UserRole = 'ADMIN' | 'USER';
-
-interface User {
-  id: string;
-  email: string;
-  name: string;
-  role: UserRole;
-}
+import { User, UserRole } from '@/types';
 
 interface AuthContextType {
   user: User | null;
@@ -103,6 +96,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const roleHierarchy: Record<UserRole, number> = {
       ADMIN: 2,
       USER: 1,
+      VIEWER: 0,
     };
 
     return roleHierarchy[user.role] >= roleHierarchy[requiredRole];

@@ -11,27 +11,35 @@ import {
   Settings,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/lib/authContext';
+import { permissions } from '@/lib/permissions';
 
 interface NavItem {
   href: string;
   label: string;
   icon: React.ReactNode;
+  key: keyof typeof permissions;
 }
 
 const navItems: NavItem[] = [
-  { href: '/dashboard/map', label: 'Map', icon: <MapPin className="h-5 w-5" /> },
-  { href: '/dashboard/trips', label: 'Trips', icon: <History className="h-5 w-5" /> },
-  { href: '/dashboard/alerts', label: 'Alerts', icon: <AlertTriangle className="h-5 w-5" /> },
-  { href: '/dashboard/geofences', label: 'Geo', icon: <Waypoints className="h-5 w-5" /> },
-  { href: '/dashboard/settings', label: 'Settings', icon: <Settings className="h-5 w-5" /> },
+  { href: '/dashboard/map', label: 'Map', icon: <MapPin className="h-5 w-5" />, key: 'map' },
+  { href: '/dashboard/trips', label: 'Trips', icon: <History className="h-5 w-5" />, key: 'trips' },
+  { href: '/dashboard/alerts', label: 'Alerts', icon: <AlertTriangle className="h-5 w-5" />, key: 'alerts' },
+  { href: '/dashboard/geofences', label: 'Geo', icon: <Waypoints className="h-5 w-5" />, key: 'geofences' },
+  { href: '/dashboard/settings', label: 'Settings', icon: <Settings className="h-5 w-5" />, key: 'settings' },
 ];
 
 export function BottomNav() {
   const pathname = usePathname();
+  const { user } = useAuth();
+
+  const visibleItems = navItems.filter(
+    (item) => user && (permissions[item.key] as readonly string[]).includes(user.role)
+  );
 
   return (
     <div className="flex items-center justify-around">
-      {navItems.map((item) => {
+      {visibleItems.map((item) => {
         const isActive = pathname === item.href || pathname.startsWith(item.href + '/');
         return (
           <Link

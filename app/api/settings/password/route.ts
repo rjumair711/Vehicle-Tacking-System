@@ -1,32 +1,15 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import { getSession, unauthorized } from '@/lib/auth';
 
-function getUserFromRequest(req: NextRequest) {
-  const token = req.cookies.get('token')?.value;
-  if (!token) return null;
+export const dynamic = 'force-dynamic';
+
+export async function PUT(req: Request) {
+  const session = await getSession();
+  if (!session) return unauthorized();
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
-      userId: string;
-      email: string;
-      role: string;
-      name: string;
-    };
-    return decoded;
-  } catch {
-    return null;
-  }
-}
-
-export async function PUT(req: NextRequest) {
-  try {
-    const authUser = getUserFromRequest(req);
-    if (!authUser) {
-      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
-    }
-
     const { currentPassword, newPassword } = await req.json();
 
     if (!currentPassword || !newPassword) {
@@ -36,7 +19,7 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    if (newPassword.length < 6) {
+    if (typeof newPassword !== 'string' || newPassword.length < 6) {
       return NextResponse.json(
         { message: 'New password must be at least 6 characters' },
         { status: 400 }
@@ -44,14 +27,14 @@ export async function PUT(req: NextRequest) {
     }
 
     const user = await prisma.user.findUnique({
-      where: { id: authUser.userId },
+      where: { userId: session.userId },
     });
 
     if (!user) {
       return NextResponse.json({ message: 'User not found' }, { status: 404 });
     }
 
-    const isMatch = await bcrypt.compare(currentPassword, user.passwordHash);
+    const isMatch = await bcrypt.compare(String(currentPassword), user.passwordHash);
     if (!isMatch) {
       return NextResponse.json(
         { message: 'Current password is incorrect' },
@@ -59,11 +42,9 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-
     await prisma.user.update({
-      where: { id: authUser.userId },
-      data: { passwordHash: hashedPassword },
+      where: { userId: session.userId },
+      data: { passwordHash: await bcrypt.hash(newPassword, 10) },
     });
 
     return NextResponse.json({ message: 'Password updated successfully' });

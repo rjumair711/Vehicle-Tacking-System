@@ -21,45 +21,36 @@ import {
   User,
   LogOut,
   MapPin,
-  Gauge,
   AlertTriangle,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 
 type NotificationSettings = {
-  emailAlerts: boolean;
-  speedingAlerts: boolean;
+  crashAlerts: boolean;
   geofenceAlerts: boolean;
-  maintenanceAlerts: boolean;
-  offlineAlerts: boolean;
 };
 
 type DisplaySettings = {
   theme: string;
   speedUnit: string;
-  temperatureUnit: string;
 };
 
 
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { user, logout, isLoading } = useAuth();
+  const { user, logout, isLoading, refreshUser } = useAuth();
   const { setTheme } = useTheme();
   const [activeTab, setActiveTab] = useState('account');
 
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>({
-    emailAlerts: true,
-    speedingAlerts: true,
+    crashAlerts: true,
     geofenceAlerts: true,
-    maintenanceAlerts: true,
-    offlineAlerts: true,
   });
 
   const [displaySettings, setDisplaySettings] = useState<DisplaySettings>({
     theme: 'dark',
     speedUnit: 'km/h',
-    temperatureUnit: 'C',
   });
 
   const [pageLoading, setPageLoading] = useState(true);
@@ -107,17 +98,13 @@ export default function SettingsPage() {
       }
 
       const loadedNotificationSettings = {
-        emailAlerts: data.emailAlerts,
-        speedingAlerts: data.speedingAlerts,
+        crashAlerts: data.crashAlerts,
         geofenceAlerts: data.geofenceAlerts,
-        maintenanceAlerts: data.maintenanceAlerts,
-        offlineAlerts: data.offlineAlerts,
       };
 
       const loadedDisplaySettings = {
         theme: data.theme,
         speedUnit: data.speedUnit,
-        temperatureUnit: data.temperatureUnit,
       };
 
       setNotificationSettings(loadedNotificationSettings);
@@ -188,6 +175,7 @@ export default function SettingsPage() {
       }
 
       setTheme(displaySettings.theme);
+      await refreshUser();
       setMessage('Display settings saved successfully');
     } catch (err: any) {
       setError(err.message || 'Failed to save display settings');
@@ -312,10 +300,12 @@ export default function SettingsPage() {
                 <Input value={user.email} readOnly className="mt-1 bg-muted" />
               </div>
 
-              <div>
-                <label className="text-sm font-medium text-foreground">Company</label>
-                <Input value={user.company || ''} readOnly className="mt-1 bg-muted" />
-              </div>
+              {user.company && (
+                <div>
+                  <label className="text-sm font-medium text-foreground">Company</label>
+                  <Input value={user.company} readOnly className="mt-1 bg-muted" />
+                </div>
+              )}
 
               <div>
                 <label className="text-sm font-medium text-foreground">Role</label>
@@ -355,39 +345,21 @@ export default function SettingsPage() {
           <Card className="border-border bg-card">
             <CardHeader>
               <CardTitle>Notification Preferences</CardTitle>
-              <CardDescription>Choose which alerts you want to receive</CardDescription>
+              <CardDescription>Choose which alerts are shown to you</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {[
                 {
-                  id: 'emailAlerts',
-                  label: 'Email Notifications',
-                  description: 'Receive alerts via email',
-                  icon: <Bell className="h-4 w-4" />,
-                },
-                {
-                  id: 'speedingAlerts',
-                  label: 'Speeding Alerts',
-                  description: 'Alert when vehicle exceeds speed limit',
-                  icon: <Gauge className="h-4 w-4" />,
+                  id: 'crashAlerts',
+                  label: 'Crash Alerts',
+                  description: 'Alert when a tracker detects a crash',
+                  icon: <AlertTriangle className="h-4 w-4" />,
                 },
                 {
                   id: 'geofenceAlerts',
                   label: 'Geofence Alerts',
                   description: 'Alert when vehicle enters/exits zones',
                   icon: <MapPin className="h-4 w-4" />,
-                },
-                {
-                  id: 'maintenanceAlerts',
-                  label: 'Maintenance Alerts',
-                  description: 'Alert for scheduled maintenance',
-                  icon: <AlertTriangle className="h-4 w-4" />,
-                },
-                {
-                  id: 'offlineAlerts',
-                  label: 'Offline Alerts',
-                  description: 'Alert when vehicle goes offline',
-                  icon: <Bell className="h-4 w-4" />,
                 },
               ].map((setting) => (
                 <div
@@ -467,23 +439,6 @@ export default function SettingsPage() {
                   <option value="m/s">Meters per second (m/s)</option>
                 </select>
               </div>
-
-              <div>
-                <label className="text-sm font-medium text-foreground">Temperature Unit</label>
-                <select
-                  value={displaySettings.temperatureUnit}
-                  onChange={(e) =>
-                    setDisplaySettings((prev) => ({
-                      ...prev,
-                      temperatureUnit: e.target.value,
-                    }))
-                  }
-                  className="mt-1 w-full rounded-lg border border-border bg-input px-3 py-2 text-foreground"
-                >
-                  <option value="C">Celsius (°C)</option>
-                  <option value="F">Fahrenheit (°F)</option>
-                </select>
-              </div>
             </CardContent>
           </Card>
 
@@ -546,26 +501,6 @@ export default function SettingsPage() {
                   disabled={changingPassword}
                 >
                   {changingPassword ? 'Updating...' : 'Change Password'}
-                </Button>
-              </div>
-
-              <div className="rounded-lg border border-border p-4">
-                <h3 className="font-semibold text-foreground mb-2">Two-Factor Authentication</h3>
-                <p className="text-sm text-muted-foreground mb-3">
-                  This feature is not implemented yet.
-                </p>
-                <Button variant="outline" disabled>
-                  Enable 2FA
-                </Button>
-              </div>
-
-              <div className="rounded-lg border border-border p-4">
-                <h3 className="font-semibold text-foreground mb-2">Active Sessions</h3>
-                <p className="text-sm text-muted-foreground mb-3">
-                  Session management is not implemented yet.
-                </p>
-                <Button variant="outline" disabled>
-                  View All Sessions
                 </Button>
               </div>
             </CardContent>

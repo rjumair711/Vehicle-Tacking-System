@@ -3,7 +3,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/authContext';
-import { generateMockTrackers, generateMockTrips } from '@/lib/mockData';
+import { fetchTrip, formatLastSeen, formatSpeed } from '@/lib/api';
+import { useLiveTrackers } from '@/lib/realtime';
 import { TrackingDevice, Trip } from '@/types';
 import {
   Card,
@@ -20,7 +21,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
-import { Gauge, MapPin, Smartphone, Signal } from 'lucide-react';
+import { Clock, Gauge, MapPin, Smartphone, User } from 'lucide-react';
 import dynamic from 'next/dynamic';
 
 const VehicleMap = dynamic(
@@ -35,18 +36,7 @@ type RoutePoint = {
   lng: number;
 };
 
-type ApiTrip = {
-  trip_id: string;
-  tracker_id: string;
-  name?: string;
-  license_plate?: string;
-  trip_date?: string;
-  start_time: string;
-  end_time?: string;
-  total_distance: number;
-  average_speed: number;
-  route_geojson?: string | object | null;
-};
+const NO_TRACKERS: TrackingDevice[] = [];
 
 function convertGeoJsonToRoutePoints(routeGeoJson: unknown): RoutePoint[] {
   if (!routeGeoJson) return [];
@@ -78,30 +68,6 @@ function convertGeoJsonToRoutePoints(routeGeoJson: unknown): RoutePoint[] {
     }));
 }
 
-function convertApiTripToTrip(apiTrip: ApiTrip): Trip {
-  return {
-    id: apiTrip.trip_id,
-    trackerId: apiTrip.tracker_id,
-    trackerName: apiTrip.name,
-
-    startTime: new Date(apiTrip.start_time),
-    endTime: apiTrip.end_time ? new Date(apiTrip.end_time) : undefined,
-
-    distance: Number(apiTrip.total_distance ?? 0),
-    duration: apiTrip.end_time
-      ? Math.floor(
-          (new Date(apiTrip.end_time).getTime() -
-            new Date(apiTrip.start_time).getTime()) /
-            60000
-        )
-      : 0,
-    averageSpeed: Number(apiTrip.average_speed ?? 0),
-    status: 'completed',
-
-    routeGeoJson: apiTrip.route_geojson,
-  };
-}
-
 export default function MapPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -111,13 +77,14 @@ export default function MapPage() {
   const trackerIdFromUrl = searchParams.get('trackerId');
   const isTripView = Boolean(tripIdFromUrl);
 
-  const [trackers, setTrackers] = useState<TrackingDevice[]>([]);
-  const [trips, setTrips] = useState<Trip[]>([]);
+  // Live positions, pushed by the backend (paused while a trip is shown).
+  const { data: trackers, error: trackersError, live } = useLiveTrackers(isTripView);
+
+  const [selectedTrip, setSelectedTrip] = useState<Trip>();
+  const [tripError, setTripError] = useState('');
   const [selectedTrackerId, setSelectedTrackerId] = useState<string>();
   const [isSheetOpen, setIsSheetOpen] = useState(false);
   const [roadRoutePoints, setRoadRoutePoints] = useState<RoutePoint[]>([]);
-
-  
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -126,48 +93,30 @@ export default function MapPage() {
   }, [isLoading, user, router]);
 
   useEffect(() => {
-    setTrackers(generateMockTrackers());
-
-    if (isTripView) return;
-
-    const interval = setInterval(() => {
-      setTrackers(generateMockTrackers());
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [isTripView]);
-
-  useEffect(() => {
     if (trackerIdFromUrl) {
       setSelectedTrackerId(trackerIdFromUrl);
     }
   }, [trackerIdFromUrl]);
 
   useEffect(() => {
-    async function loadTrips() {
-      try {
-        const response = await fetch('/api/trips');
-        const data = await response.json();
+    let cancelled = false;
+    setSelectedTrip(undefined);
+    setTripError('');
 
-        if (data.success && Array.isArray(data.trips)) {
-          setTrips(data.trips.map(convertApiTripToTrip));
-          return;
-        }
+    if (!tripIdFromUrl) return;
 
-        setTrips(generateMockTrips());
-      } catch {
-        setTrips(generateMockTrips());
-      }
-    }
+    fetchTrip(tripIdFromUrl)
+      .then((trip) => {
+        if (!cancelled) setSelectedTrip(trip);
+      })
+      .catch((err) => {
+        if (!cancelled) setTripError(err?.message || 'Failed to load trip');
+      });
 
-    loadTrips();
-  }, []);
-
-  const selectedTrip = useMemo(() => {
-    if (!tripIdFromUrl) return undefined;
-
-    return trips.find((trip) => trip.id === tripIdFromUrl);
-  }, [trips, tripIdFromUrl]);
+    return () => {
+      cancelled = true;
+    };
+  }, [tripIdFromUrl]);
 
   const selectedTripRoute = useMemo(() => {
     if (!selectedTrip?.routeGeoJson) return [];
@@ -227,6 +176,9 @@ export default function MapPage() {
 
   if (isLoading || !user) return null;
 
+  const statusVariant = (status: TrackingDevice['status']) =>
+    status === 'online' ? 'default' : status === 'offline' ? 'secondary' : 'outline';
+
   return (
     <div className="h-full flex flex-col lg:flex-row gap-4 p-4 sm:p-6">
       <div className="flex-1 min-h-96 lg:min-h-0">
@@ -239,14 +191,15 @@ export default function MapPage() {
               {isTripView
                 ? selectedTrip
                   ? `${selectedTrip.trackerName ?? selectedTrip.trackerId} route`
-                  : 'Loading selected trip route'
-                : 'Real-time tracker locations'}
+                  : tripError || 'Loading selected trip route'
+                : trackersError ||
+                  (live ? 'Real-time tracker locations · live' : 'Tracker locations · updating every 5 s')}
             </CardDescription>
           </CardHeader>
 
           <CardContent className="p-0 h-[60vh] lg:h-[75vh]">
             <VehicleMap
-              vehicles={isTripView ? [] : trackers}
+              vehicles={isTripView ? NO_TRACKERS : trackers}
               selectedVehicleId={selectedTrackerId}
               onVehicleSelect={(trackerId) => {
                 setSelectedTrackerId(trackerId);
@@ -269,42 +222,60 @@ export default function MapPage() {
               {isTripView
                 ? selectedTrip
                   ? 'Trip route loaded on map'
-                  : 'Loading trip'
+                  : tripError || 'Loading trip'
                 : `${trackers.length} total trackers`}
             </CardDescription>
           </CardHeader>
 
           <CardContent>
-            {isTripView && selectedTrip ? (
+            {isTripView ? (
               <div className="rounded-lg border border-primary bg-primary/10 p-4">
-                <p className="font-medium text-foreground">
-                  {selectedTrip.trackerName ?? selectedTrip.trackerId}
-                </p>
+                {selectedTrip && (
+                  <>
+                    <p className="font-medium text-foreground">
+                      {selectedTrip.trackerName ?? selectedTrip.trackerId}
+                    </p>
 
-                <p className="text-xs text-muted-foreground mt-1">
-                  Tracker ID: {selectedTrip.trackerId}
-                </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Tracker ID: {selectedTrip.trackerId}
+                    </p>
 
-                <div className="mt-4 space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Distance</span>
-                    <span className="font-medium">
-                      {selectedTrip.distance.toFixed(2)} km
-                    </span>
-                  </div>
+                    <div className="mt-4 space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Date</span>
+                        <span className="font-medium">
+                          {selectedTrip.startTime.toLocaleDateString()}
+                        </span>
+                      </div>
 
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Average Speed</span>
-                    <span className="font-medium">
-                      {selectedTrip.averageSpeed.toFixed(1)} km/h
-                    </span>
-                  </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Distance</span>
+                        <span className="font-medium">
+                          {selectedTrip.distance.toFixed(2)} km
+                        </span>
+                      </div>
 
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Route Points</span>
-                    <span className="font-medium">{routeToDisplay.length}</span>
-                  </div>
-                </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Average Speed</span>
+                        <span className="font-medium">
+                          {formatSpeed(selectedTrip.averageSpeed, user.speedUnit)}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Max Speed</span>
+                        <span className="font-medium">
+                          {formatSpeed(selectedTrip.maxSpeed, user.speedUnit)}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Recorded Points</span>
+                        <span className="font-medium">{selectedTripRoute.length}</span>
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 <button
                   onClick={() => router.push('/dashboard/trips')}
@@ -315,6 +286,10 @@ export default function MapPage() {
               </div>
             ) : (
               <div className="space-y-2 max-h-[calc(100vh-240px)] overflow-y-auto">
+                {trackers.length === 0 && (
+                  <p className="text-sm text-muted-foreground">No trackers to show.</p>
+                )}
+
                 {trackers.map((tracker) => (
                   <button
                     key={tracker.trackerId}
@@ -335,26 +310,24 @@ export default function MapPage() {
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {tracker.licensePlate ?? 'N/A'}
+                          {tracker.shared ? ` · shared by ${tracker.customer?.name}` : ''}
                         </p>
                       </div>
 
-                      <Badge
-                        variant={
-                          tracker.status === 'active'
-                            ? 'default'
-                            : tracker.status === 'inactive'
-                              ? 'secondary'
-                              : 'outline'
-                        }
-                        className="text-xs"
-                      >
+                      <Badge variant={statusVariant(tracker.status)} className="text-xs">
                         {tracker.status}
                       </Badge>
                     </div>
 
                     <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
-                      <span>{tracker.location?.speed ?? 0} km/h</span>
-                      <span>{tracker.battery ?? 0}% battery</span>
+                      {tracker.location ? (
+                        <>
+                          <span>{formatSpeed(tracker.location.speed, user.speedUnit)}</span>
+                          <span>Last seen {formatLastSeen(tracker.lastSeen)}</span>
+                        </>
+                      ) : (
+                        <span>No position received yet</span>
+                      )}
                     </div>
                   </button>
                 ))}
@@ -377,13 +350,13 @@ export default function MapPage() {
                 </SheetDescription>
               </SheetHeader>
 
-              <div className="mt-6 space-y-4">
+              <div className="mt-6 space-y-4 overflow-y-auto px-4 pb-6">
                 <div className="grid gap-4">
                   <div className="rounded-lg border border-border bg-muted/50 p-4">
                     <p className="text-xs font-semibold text-muted-foreground mb-2">
                       Status
                     </p>
-                    <Badge variant="default">
+                    <Badge variant={statusVariant(selectedTracker.status)}>
                       {selectedTracker.status.toUpperCase()}
                     </Badge>
                   </div>
@@ -396,7 +369,7 @@ export default function MapPage() {
                       </p>
                     </div>
                     <p className="text-2xl font-bold text-foreground">
-                      {selectedTracker.location?.speed ?? 0} km/h
+                      {formatSpeed(selectedTracker.location?.speed, user.speedUnit)}
                     </p>
                   </div>
 
@@ -410,9 +383,26 @@ export default function MapPage() {
                     <p className="text-xs text-muted-foreground">
                       {selectedTracker.location
                         ? `${selectedTracker.location.lat.toFixed(
-                            4
-                          )}, ${selectedTracker.location.lng.toFixed(4)}`
-                        : 'N/A'}
+                            5
+                          )}, ${selectedTracker.location.lng.toFixed(5)}`
+                        : 'No position received yet'}
+                    </p>
+                    {selectedTracker.location?.timestamp && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        GPS time: {selectedTracker.location.timestamp.toLocaleString()}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border border-border p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Clock className="h-4 w-4 text-primary" />
+                      <p className="text-sm font-semibold text-foreground">
+                        Last Seen
+                      </p>
+                    </div>
+                    <p className="text-foreground">
+                      {formatLastSeen(selectedTracker.lastSeen)}
                     </p>
                   </div>
 
@@ -428,26 +418,20 @@ export default function MapPage() {
                     </p>
                   </div>
 
-                  <div className="rounded-lg border border-border p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Signal className="h-4 w-4 text-primary" />
-                      <p className="text-sm font-semibold text-foreground">
-                        Signal Strength
+                  {user.role === 'ADMIN' && selectedTracker.customer && (
+                    <div className="rounded-lg border border-border p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <User className="h-4 w-4 text-primary" />
+                        <p className="text-sm font-semibold text-foreground">
+                          Customer
+                        </p>
+                      </div>
+                      <p className="text-foreground">{selectedTracker.customer.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {selectedTracker.customer.email}
                       </p>
                     </div>
-                    <p className="text-foreground">
-                      {selectedTracker.signalStrength ?? 'N/A'} dBm
-                    </p>
-                  </div>
-
-                  <div className="rounded-lg border border-border p-4">
-                    <p className="text-xs font-semibold text-muted-foreground mb-2">
-                      Battery
-                    </p>
-                    <p className="text-xl font-bold text-foreground">
-                      {selectedTracker.battery ?? 0}%
-                    </p>
-                  </div>
+                  )}
                 </div>
               </div>
             </>
