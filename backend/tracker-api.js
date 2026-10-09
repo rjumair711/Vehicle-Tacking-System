@@ -549,12 +549,14 @@ async function handleManifest(req, res) {
   // Dev tunnels may rewrite Host to localhost:<port>; the public hostname the
   // tracker actually used is in X-Forwarded-Host.
   const publicHost = req.headers["x-forwarded-host"] || req.headers.host;
-  sendJson(res, 200, {
+  // Render's edge re-sends JSON replies chunked, without Content-Length, and the
+  // modem then reports a 0-byte body. Binary replies keep their length.
+  sendBody(res, 200, "application/octet-stream", JSON.stringify({
     version: latest.version,
     url: `https://${publicHost}/firmware/${latest.filename}`,
     size: latest.size,
     sha256: latest.sha256,
-  });
+  }));
 }
 
 async function handleFirmwareDownload(req, res, url) {
