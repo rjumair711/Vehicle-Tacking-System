@@ -35,10 +35,10 @@ const char* DEVICE_ID     = "TRK-0001";
 // AUTH_TOKEN is defined in secrets.h (not committed; copy secrets.example.h).
 #include "secrets.h"
 
-// Backend host: VS Code dev tunnel for testing, Render when deployed.
-const char* TELEMETRY_URL    = "https://d6v0336q-33430.inc1.devtunnels.ms/api/tracker-data";
-const char* OTA_MANIFEST_URL = "https://d6v0336q-33430.inc1.devtunnels.ms/api/firmware/latest";
-// Render: "https://k-track-api.onrender.com/api/tracker-data" / ".../api/firmware/latest"
+// Backend host: Render. For local testing use a VS Code dev tunnel instead.
+const char* TELEMETRY_URL    = "https://ktrack-backend.onrender.com/api/tracker-data";
+const char* OTA_MANIFEST_URL = "https://ktrack-backend.onrender.com/api/firmware/latest";
+// Dev tunnel: "https://d6v0336q-33430.inc1.devtunnels.ms/api/tracker-data" / ".../api/firmware/latest"
 const char* APN              = "jazz";
 
 // Feature switches (turn off to bench-test without the backend).

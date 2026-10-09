@@ -440,6 +440,12 @@ async function storeRecord(tracker, record) {
   return "stored";
 }
 
+// Prints one line per received record (on Render: the service's Logs tab).
+function logRecord(deviceId, record, result) {
+  const { token, ...shown } = record;
+  console.log(`[DATA] ${deviceId} ${result}: ${JSON.stringify(shown)}`);
+}
+
 async function handleTelemetry(req, res, text) {
   let data;
   try {
@@ -479,6 +485,7 @@ async function handleTelemetry(req, res, text) {
 
   // Same reply for an unknown device and a wrong token.
   if (!tracker || !(await verifyDeviceToken(token, tracker.secret_token_hash))) {
+    console.log(`[DATA] ${deviceId} rejected: unknown device or invalid token`);
     return sendJson(res, 401, { ok: false, error: "unknown device or invalid token" });
   }
   if (tracker.status !== "ACTIVE") {
@@ -492,6 +499,7 @@ async function handleTelemetry(req, res, text) {
 
   if (!isBatch) {
     const result = await storeRecord(tracker, records[0]);
+    logRecord(deviceId, records[0], result);
     return result === "stored"
       ? sendJson(res, 201, { ok: true, stored: true })
       : sendJson(res, 200, { ok: true, stored: false, reason: result });
@@ -504,7 +512,9 @@ async function handleTelemetry(req, res, text) {
   };
   const counts = { stored: 0, duplicate: 0, discarded: 0 };
   for (const record of [...records].sort((a, b) => sortKey(a) - sortKey(b))) {
-    counts[await storeRecord(tracker, record)]++;
+    const result = await storeRecord(tracker, record);
+    logRecord(deviceId, record, result);
+    counts[result]++;
   }
   sendJson(res, 201, { ok: true, received: records.length, ...counts });
 }
