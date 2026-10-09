@@ -4,14 +4,13 @@ K-Track is a vehicle GPS tracker built around an **ESP32**, an **MPU6050** motio
 
 This README documents the whole system as it stands now, how it got here version by version, and every problem hit and fixed along the way.
 
-> **Status (29 Sep 2026)**
-> - Firmware source: **`FW_VERSION` 3.6.0**: UTC timestamps with milliseconds, no send timing, OTA checked every minute in 16 KB pieces, and the no-fix coordinates bug fixed (§9, E36). Compiles for ESP32 (441,661 bytes of flash, 25,896 bytes of RAM). Not yet flashed.
-> - Tracker: runs **3.4.0**, installed over the air on 29 Sep 2026.
-> - **First successful OTA update, 29 Sep 2026:** the tracker went from 3.3.0 to 3.4.0 over the air (443,792-byte image, 19 pieces of 24 KB). The first millisecond-stamped record arrived at 10:55:39.197.
->   - The installed image is an **early 3.4.0 build**. It has the millisecond clock and `[RTT]` timing, but not the later OTA fixes: it still downloads with the merged header that the server works around (§9, E29).
->   - Build the next update from the current source, with a higher version.
-> - **`version_4/version_4.ino` (v4.0.0):** a simpler beginner-style rewrite of 3.6 (§7). Not yet flashed.
-> - Backend: **`tracker-api.js`** (Node.js) is now the real backend, deployed on Render. It stores records in the PostgreSQL/PostGIS database, serves OTA, and pushes live updates to the dashboard (the Next.js app in the repo root, on Vercel). See §5.
+> **Status (9 Oct 2026)**
+> - **Deployed and working end to end.** The backend runs on Render at `https://ktrack-backend.onrender.com`. Tracker `TRK-0001` is registered on the dashboard, sends a record every 5 s to Render, and shows on the dashboard's live map.
+> - **Crash alert confirmed:** a record with `crash: true` from `TRK-0001` was stored as an alert on 9 Oct 2026 (12:17:35 UTC).
+> - Firmware source: **`FW_VERSION` 3.6.2**. Both URLs point at Render, and the device token is in `secrets.h` (§4.1). The version running on the tracker should be read from the `[SYS]` line of the Serial Monitor; it isn't recorded here.
+> - **First successful OTA update, 29 Sep 2026:** the tracker went from 3.3.0 to 3.4.0 over the air (443,792-byte image, 19 pieces of 24 KB), through the dev tunnel. OTA through Render has not been tested yet.
+> - Backend: **`tracker-api.js`** (Node.js) stores records in the PostgreSQL/PostGIS database, serves OTA, pushes live updates to the dashboard (the Next.js app in the repo root, on Vercel), and prints every received record to the log (§5.4). See §5.
+> - **v4.0.0** (the simpler rewrite described in §7) is not in this repository.
 
 ---
 
@@ -20,7 +19,7 @@ This README documents the whole system as it stands now, how it got here version
 1. [Files in this folder](#1-files-in-this-folder)
 2. [System architecture](#2-system-architecture)
 3. [Hardware, wiring and flash layout](#3-hardware-wiring-and-flash-layout)
-4. [Firmware reference (v3.6.0)](#4-firmware-reference-v360)
+4. [Firmware reference (v3.6.2)](#4-firmware-reference-v362)
 5. [Backend reference (`tracker-api.js`)](#5-backend-reference-tracker-apijs)
 6. [How to run, flash and update](#6-how-to-run-flash-and-update)
 7. [Firmware version history](#7-firmware-version-history)
@@ -36,10 +35,12 @@ This README documents the whole system as it stands now, how it got here version
 
 | File / folder | What it is | Status |
 |---|---|---|
-| `esp32_sim7608_gps_tracker.ino` | Tracker firmware (Arduino sketch, ~1,900 lines) | **Current**, v3.6.0 |
+| `esp32_sim7608_gps_tracker.ino` | Tracker firmware (Arduino sketch, ~1,900 lines) | **Current**, v3.6.2 |
+| `secrets.h` | The tracker's device token (`AUTH_TOKEN`), included by the sketch | Keep private; it is in `.gitignore` |
+| `secrets.example.h` | Template for `secrets.h` | Copy it to `secrets.h` and put the token in |
 | `tracker-api.js` | Backend: telemetry ingest into the database, OTA download, live WebSocket push | **Current** |
 | `package.json` | Its dependencies: `pg`, `ws`, `bcryptjs`, `jsonwebtoken` | Run `npm install` once |
-| `.env` | `DATABASE_URL=…` and `JWT_SECRET=…`, read automatically by `tracker-api.js` | Keep private, never commit |
+| `.env` | `DATABASE_URL=…` and `JWT_SECRET=…`, read automatically by `tracker-api.js` when run locally. On Render these are set in the Environment tab | Keep private, never commit |
 | `README.md` | This document | |
 
 ---
@@ -56,8 +57,8 @@ This README documents the whole system as it stands now, how it got here version
  └──────────────┬───────────────────────────────────────────┘
                 │  HTTPS (TLS inside the modem), Jazz 4G, APN "jazz"
                 ▼
-   TLS-terminating edge — VS Code dev tunnel (*.devtunnels.ms)
-                        or Render (*.onrender.com)
+   TLS-terminating edge — Render (ktrack-backend.onrender.com)
+                        or a VS Code dev tunnel for local testing
                 │  plain HTTP
                 ▼
    tracker-api.js  (Node http server, port $PORT or 33430)
@@ -117,16 +118,16 @@ The firmware lives in app0/app1, not in the 1,408 KB data partition, so the buff
 
 ---
 
-## 4. Firmware reference (v3.6.0)
+## 4. Firmware reference (v3.6.2)
 
 ### 4.1 Configuration (top of the sketch)
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `FW_VERSION` | `"3.6.0"` | Compared by OTA. **Must equal the version typed on the upload page** (§9, E30) |
+| `FW_VERSION` | `"3.6.2"` | Compared by OTA. **Must equal the version typed on the upload page** (§9, E30) |
 | `DEVICE_ID` | `"TRK-0001"` | Sent as `device_id`. Must equal the Tracker ID registered on the dashboard's Devices page |
-| `AUTH_TOKEN` | 64 hex chars | Sent as `Authorization: Bearer …`. Must equal the Device Token entered for this tracker on the dashboard's Devices page (stored there as a bcrypt hash) |
-| `TELEMETRY_URL` | `https://d6v0336q-33430.inc1.devtunnels.ms/api/tracker-data` | The Render URL is kept in a comment below it |
+| `AUTH_TOKEN` | 64 hex chars, defined in `secrets.h` | Sent as `Authorization: Bearer …`. Must equal the Device Token entered for this tracker on the dashboard's Devices page (stored there as a bcrypt hash). Each tracker has its own token |
+| `TELEMETRY_URL` | `https://ktrack-backend.onrender.com/api/tracker-data` | The dev tunnel URL is kept in a comment below it |
 | `OTA_MANIFEST_URL` | same host `/api/firmware/latest` | Change together with `TELEMETRY_URL` |
 | `APN` | `"jazz"` | SIM operator APN |
 | `FEATURE_TELEMETRY_SEND` / `FEATURE_OTA` | `true` / `true` | Switch either off for bench tests |
@@ -407,13 +408,19 @@ A record with no usable position or time is answered **200 `stored:false`**, not
 - **Download link host.** The firmware download URL is built from `X-Forwarded-Host`, because a dev tunnel may rewrite `Host` to `localhost:<port>`.
 - **Everything is persisted** in the database: positions, alerts and firmware images survive a restart or redeploy.
 - **Live socket access.** A dashboard user gets a 2-minute ticket from the Next.js app and opens the socket with it. The admin receives all events, an owner their own trackers' positions and alerts, an invited viewer positions only.
+- **Every received record is printed.** One line per record, visible in the terminal or in the Render service's **Logs** tab:
+  `[DATA] TRK-0001 stored: {"device_id":"TRK-0001","latitude":…,"crash":false,…}`
+  - The word after the tracker ID is `stored`, `duplicate` or `discarded`.
+  - An unknown device or wrong token prints `[DATA] <id> rejected: unknown device or invalid token`.
+  - The device token is never printed.
+  - At one record every 5 s this is about 17,000 lines a day per tracker.
 - **Restart after editing.** Node doesn't reload a running script when the file changes.
 
 ---
 
 ## 6. How to run, flash and update
 
-### 6.1 Local backend + VS Code dev tunnel (current test setup)
+### 6.1 Local backend + VS Code dev tunnel (local testing)
 
 1. **Sync the laptop clock** (Settings → Time & language → Date & time → **Sync now**). Otherwise `received_at` is wrong (§9, E24).
 2. **Start the backend:** `npm install` once, then `node tracker-api.js` (keep the terminal open). It needs `DATABASE_URL` and `JWT_SECRET` in `.env`.
@@ -422,18 +429,24 @@ A record with no usable position or time is answered **200 `stored:false`**, not
 5. **Point the firmware at the tunnel.** Put the tunnel URL (the **Forwarded Address**, not the terminal's `localhost` links) into `TELEMETRY_URL` and `OTA_MANIFEST_URL`, keeping the paths.
 6. **Keep VS Code open,** because closing it closes the tunnel.
 
-### 6.2 Render (deployment)
+### 6.2 Render (deployment, in use)
 
 - **Service:** Web Service with root directory `backend`, build command `npm install`, start command `node tracker-api.js`, health check path `/healthz`. The `render.yaml` in the repo root describes exactly this. Render sets `PORT` itself.
 - **Environment:** set `DATABASE_URL`, `JWT_SECRET` (same values as the dashboard on Vercel) and `FRONTEND_ORIGIN` in the dashboard. Don't upload `.env`.
 - **Region:** pick **Singapore**. It's usually better connected from Pakistan than the Azure India relay the dev tunnel uses (§9, E26).
-- **Firmware URLs:** switch both to `https://<service>.onrender.com/…`. The commented line under `TELEMETRY_URL` has the paths.
-- **Dashboard:** set `BACKEND_URL=https://<service>.onrender.com` on Vercel so the dashboard receives live pushes.
+- **Service address:** `https://ktrack-backend.onrender.com`. `/healthz` answers `{"ok":true,"service":"k-track-backend"}`.
+- **Firmware URLs:** both already point at it (§4.1).
+- **Dashboard:** set `BACKEND_URL=https://ktrack-backend.onrender.com` on Vercel so the dashboard receives live pushes.
+- **Deploying a change:** push to `main`; Render redeploys the service. The tracker fails a few sends during the restart and then recovers.
+- **Watching the data:** the service's **Logs** tab shows one `[DATA]` line per record (§5.4).
+- **Checking a token:** `GET /api/firmware/latest` with the tracker's `Authorization: Bearer` header answers 401 for a token that isn't registered, and 404 or 200 for one that is.
 - **Free plan:** the service sleeps when idle; a tracker reporting every 5 s keeps it awake. Firmware images are in the database, so nothing is lost on a restart.
 
 ### 6.3 Flashing over USB
 
 1. Open **`esp32_sim7608_gps_tracker.ino`** (not an older copy such as `firmware_v9.ino`) and check the IDE settings in §3.
+   - `secrets.h` must be in the same folder with this tracker's token. For a new tracker, copy `secrets.example.h` to `secrets.h` and paste the Device Token generated on the dashboard's Devices page.
+   - `DEVICE_ID` must equal the Tracker ID registered there.
 2. Upload, then open the Serial Monitor at 115200. Keep the vehicle still for the 5 s calibration.
 
 ### 6.4 OTA update procedure
@@ -538,7 +551,7 @@ Installed on the tracker over the air on 29 Sep 2026 (an early build without the
   - The update-check log shows announced versus read bytes.
 - **Compile check:** ESP32 Dev Module, 443,469 B of program storage (33%) and 50,592 B of global RAM (15%).
 
-### v3.5.0 (current source, 29 Sep 2026)
+### v3.5.0 (29 Sep 2026)
 
 - **Timestamps back to UTC.**
   - `recorded_at` and `created_at` are sent as `YYYY-MM-DDTHH:MM:SS.mmmZ`, keeping millisecond precision.
@@ -559,7 +572,7 @@ Installed on the tracker over the air on 29 Sep 2026 (an early build without the
 - Never flashed; superseded by 3.6.0.
 - **Tests:** the new timestamp parser was checked on the new UTC form, the 3.4 form (`.197+05:00`), the 3.3 form (`+05:00`, no milliseconds) and malformed input. The backend was checked with UTC and `+05:00` records, and the OTA download test passes.
 
-### v3.6.0 (current source, 29 Sep 2026)
+### v3.6.0 (29 Sep 2026)
 
 - **Millisecond precision dropped, then restored.**
   - First the timestamps were cut to whole seconds (`2026-09-29T05:55:39Z`). Milliseconds were then put back on request (`….mmmZ`, GPS fraction read again, and the backend's `received_at` too).
@@ -576,9 +589,16 @@ Installed on the tracker over the air on 29 Sep 2026 (an early build without the
 - **Compile check:** 441,273 B of program storage (33%) and 25,888 B of global RAM (7%).
 - **Tests:** the backend served a 441,273-byte image as four 128 KB `?range=` pieces that rejoined byte-for-byte, and it kept the newest record when older backlog records arrived. The OTA download test passes.
 
+### v3.6.2 (current source, 9 Oct 2026)
+
+- **Backend host is Render.** `TELEMETRY_URL` and `OTA_MANIFEST_URL` point at `https://ktrack-backend.onrender.com`. The dev tunnel address is kept in a comment for local testing.
+- **Token moved to `secrets.h`.** `AUTH_TOKEN` is no longer in the sketch, so the token isn't pushed with the code. `secrets.example.h` is the template.
+- **In use:** tracker `TRK-0001` is registered on the dashboard and sends to Render; its records and a crash alert were stored on 9 Oct 2026.
+- What else changed between 3.6.0 and 3.6.2 was not written down. The reference in §4 describes 3.6.0 behaviour and should be checked against the sketch.
+
 ### v4.0.0 (`version_4/version_4.ino`, simple rewrite, 29 Sep 2026)
 
-A beginner-style rewrite of 3.6 in its own sketch folder. The 3.x file stays as it was.
+A beginner-style rewrite of 3.6 in its own sketch folder. The 3.x file stays as it was. **The `version_4` folder is not in this repository**; this section is kept as a record of that work.
 
 - **Structure:**
   - no structs, only plain global variables;
@@ -622,6 +642,7 @@ A beginner-style rewrite of 3.6 in its own sketch folder. The 3.x file stays as 
 | 28–29 Sep 2026 fixes | `PORT` from the environment again (it had been hardcoded) · OTA page text (5 min, not 6 h; version example) · `X-Forwarded-Host` for the download link · **SSE live page restored** · `received_at` + `delay_ms` (PKT, then UTC) · **`Content-Length` on every reply** · **merged-header split** + `?range=` support |
 | 29 Sep 2026 (with firmware 3.6.0) | `delay_ms` removed · **"latest" = newest `recorded_at`**, so backlog records don't overwrite the live position |
 | 3 Oct 2026 (integration with the dashboard) | **Records stored in PostgreSQL/PostGIS** (Neon) · per-device tokens checked against bcrypt hashes (the shared `TRACKER_API_KEY` is gone) · duplicate and batch handling · crash and geofence alerts · **WebSocket push** to the dashboard · OTA images read from the database (uploaded on the dashboard) · the open test page, `/events`, `/ota` and `GET /api/tracker-data` removed |
+| 9 Oct 2026 | Deployed on Render as `ktrack-backend` · every received record printed as a `[DATA]` line, and rejected requests logged (§5.4) |
 
 ---
 
@@ -698,7 +719,7 @@ Each entry lists the symptom, the cause, the fix, and whether it's resolved.
 
 **E16. `FW_VERSION` didn't match the header label (3.0.0 vs v3.1.0; 3.1.0 vs v3.2.0).**
 - **Why it matters:** OTA compares `FW_VERSION`, so a mismatch invites wrong uploads.
-- **Fix:** kept in sync. Now 3.6.0 in both. ✅
+- **Fix:** kept in sync up to 3.6.0. ⚠️ Out of sync again: `FW_VERSION` is 3.6.2 while the sketch's top comment still says v3.6.0. Update the comment.
 
 **E17. The tracker stayed asleep after reconnecting.**
 - **Cause:** `bufferSleepCycle()` resumed only once a whole segment had been freed, which was about 2.8 h of draining.
@@ -827,14 +848,16 @@ Each entry lists the symptom, the cause, the fix, and whether it's resolved.
 ## 11. Known limitations and open items
 
 **Open or needing action**
-- **Code 714 connection failures** through the India relay (E26). Try Render in Singapore; consider a PDP reset after repeated 7xx errors.
-- **The laptop clock must be synced** for `received_at` (E24).
+- **Code 714 connection failures** (E26) were seen through the dev tunnel's India relay. The tracker now sends to Render, so that relay is no longer in the path; watch whether 714 still appears, and consider a PDP reset after repeated 7xx errors.
+- **The laptop clock must be synced** (E24) only when the backend runs locally.
+- **OTA through Render** has not been tested yet.
+- **Sketch header label** still says v3.6.0 (E16).
 - **Upload `.bin` files with the matching version** (E30).
 
 **Firmware**
 - **Clock accuracy:** GPS-locked but limited by the modem's hand-over delay. 1PPS wiring is needed for true 1 ms accuracy.
 - **Connection per record:** each record opens a new TLS connection. This costs data and time and exposes each record to connection failures. A kept-open socket (`AT+CCHOPEN`/`CCHSEND`) would fix all three but is a rewrite of the send path.
-- **Certificates:** `authmode 0` means the modem doesn't verify the server's certificate. For production, load a CA certificate and use `authmode 1`.
+- **Certificates:** `authmode 0` means the modem doesn't verify the server's certificate. For production, load a CA certificate and use `authmode 1`. The steps, and restricting TLS to 1.2, are written up in `future-improvements.txt` in the repo root.
 - **Modem power:** the modem isn't put to sleep during the ESP32's light sleep (~17–20 mA idle).
 - **Crash detection pauses** while the buffer is full (light sleep stops both cores).
 - **Silent sensor reset:** the MPU recovery can't detect it (a periodic read-back of `PWR_MGMT_1` would).
