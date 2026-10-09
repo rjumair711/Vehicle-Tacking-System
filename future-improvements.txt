@@ -1,0 +1,66 @@
+K-Track - Future improvements
+Written 9 Oct 2026. Not implemented yet; to be done later.
+
+
+TRACKER TO BACKEND SECURITY
+===========================
+
+How it works now
+----------------
+- The tracker talks to the backend over HTTPS (HTTP over TLS), not plain HTTP.
+  TLS runs inside the modem up to Render. Render terminates TLS and forwards
+  plain HTTP to tracker-api.js inside its own network.
+- Each tracker has its own authorization token, generated when the device is
+  registered on the dashboard's Devices page. The backend stores only the
+  bcrypt hash. The token is sent in the Authorization header, so it is
+  encrypted on the mobile network.
+- Keep one token per device. Do not switch to one shared token for all
+  devices: a leaked shared token would let someone send fake data for every
+  vehicle, and one device could not be cut off without reflashing the fleet.
+
+
+1. Verify the server's certificate (do this first)
+--------------------------------------------------
+Problem:
+  The modem is set to "authmode 0": the connection is encrypted, but the
+  tracker does not check the server's certificate. An attacker in the network
+  path could pretend to be the backend and read the device token.
+
+Fix:
+  - Load the CA certificate for ktrack-backend.onrender.com into the modem
+    (AT+CCERTDOWN).
+  - Point the SSL context at it (AT+CSSLCFG="cacert",0,"<file>").
+  - Change authmode from 0 to 1 in modemConfigureTls() in
+    backend/esp32_sim7608_gps_tracker.ino.
+
+Notes:
+  - Must be tested on the real modem.
+  - The CA certificate expires or can change. A tracker with an outdated
+    certificate can no longer connect, and then cannot receive an OTA update
+    either, so plan how the certificate is renewed before using this in the
+    field.
+  - The modem needs the correct time to check certificate dates.
+
+
+2. Allow TLS 1.2 only
+---------------------
+Problem:
+  The modem is configured to accept TLS 1.0 to 1.2. TLS 1.0 and 1.1 are
+  outdated.
+
+Fix:
+  Set the SSL version to TLS 1.2 only in modemConfigureTls()
+  (AT+CSSLCFG="sslversion",0,3). Check on the modem that sends still work.
+
+
+3. Smaller related items
+------------------------
+- Each tracker needs its own secrets.h when flashing, so the same firmware
+  build cannot be copied onto every tracker as it is. For many devices, move
+  the token out of the firmware image (for example into NVS, written once at
+  setup). This also keeps the token out of the OTA .bin file.
+- The OTA update check sends the token but no device ID, so the backend
+  compares it with every active tracker's hash. For a large fleet, send the
+  device ID with the OTA requests.
+- Each record opens a new TLS connection (about 100 MB of mobile data a day).
+  A kept-open connection would cut data use and delay.

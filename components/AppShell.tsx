@@ -4,6 +4,7 @@ import React from 'react';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
 import { BottomNav } from './BottomNav';
+import { CrashAlertToast } from './CrashAlertToast';
 import { useIsMobile } from '@/hooks/use-mobile';
 
 interface AppShellProps {
@@ -15,6 +16,7 @@ export function AppShell({ children }: AppShellProps) {
 
   return (
     <div className="flex h-screen bg-background">
+      <CrashAlertToast />
       {/* Desktop Sidebar */}
       {!isMobile && (
         <aside className="w-64 border-r border-border bg-sidebar">
