@@ -1,5 +1,5 @@
 /*
- * K-Track Vehicle Tracker Firmware  v3.6.0
+ * K-Track Vehicle Tracker Firmware  v3.6.6
  * ESP32 + MPU6050 + SIMCom A7608E-H (4G LTE + GNSS)
  *
  * - MPU6050 at 100 Hz on core 0 with bias calibration and crash detection; a
@@ -30,7 +30,7 @@
 #include "mbedtls/sha256.h"
 
 /* ============================== CONFIGURATION ============================== */
-const char* FW_VERSION    = "3.6.2";
+const char* FW_VERSION    = "3.6.6";
 const char* DEVICE_ID     = "TRK-0001";
 // AUTH_TOKEN is defined in secrets.h (not committed; copy secrets.example.h).
 #include "secrets.h"
@@ -1624,11 +1624,22 @@ bool otaInstall(const OtaManifest& m) {
   return Update.end(true);   // boot new slot next
 }
 
-// Parked, good signal, no crash report pending and nothing buffered.
+// Parked, good signal, no crash waiting to be sent and nothing buffered.
+// Prints what is missing when the update has to wait.
 bool otaSafeToUpdate(void) {
   bool parked = g_fix.valid && g_fix.speedKmh < 3.0f;
   bool network = g_networkReady && g_signalQuality >= 10;
-  return parked && network && !g_crash.pending && !g_crashAwaitingRecord && g_buffer.count == 0;
+  bool noCrash = !g_crash.pending && !g_crashAwaitingRecord;
+  bool bufferEmpty = g_buffer.count == 0;
+  if (parked && network && noCrash && bufferEmpty) return true;
+  Serial.printf("[OTA] postponed:%s%s%s%s%s
+",
+                !g_fix.valid ? " no GPS fix;" : "",
+                (g_fix.valid && !parked) ? " vehicle moving;" : "",
+                network ? "" : " weak or no network;",
+                noCrash ? "" : " crash waiting to be sent;",
+                bufferEmpty ? "" : " buffered records waiting;");
+  return false;
 }
 
 void otaCheck(void) {
@@ -1636,7 +1647,7 @@ void otaCheck(void) {
   if (!otaFetchManifest(m)) { Serial.println("[OTA] could not read manifest"); return; }
   Serial.printf("[OTA] running %s, server has %s\r\n", FW_VERSION, m.version.c_str());
   if (!otaIsNewer(m.version, FW_VERSION)) { Serial.println("[OTA] up to date"); return; }
-  if (!otaSafeToUpdate()) { Serial.println("[OTA] postponed: vehicle not parked or weak network"); return; }
+  if (!otaSafeToUpdate()) return;   // it prints why
   if (otaInstall(m)) {
     Serial.printf("[OTA] verified, rebooting into %s\r\n", m.version.c_str());
     delay(500);

@@ -543,6 +543,7 @@ async function handleManifest(req, res) {
     return sendJson(res, 401, { ok: false, error: "invalid or missing Authorization header" });
   }
   const latest = await latestFirmware();
+  console.log(`[OTA] update check: ${latest ? "latest is " + latest.version : "no firmware uploaded yet"}`);
   if (!latest) return sendJson(res, 404, { ok: false, error: "no firmware uploaded yet" });
 
   // Dev tunnels may rewrite Host to localhost:<port>; the public hostname the
@@ -597,6 +598,7 @@ async function handleFirmwareDownload(req, res, url) {
     "Accept-Ranges": "bytes",
   };
   if (range) headers["Content-Range"] = `bytes ${start}-${end}/${total}`;
+  console.log(`[OTA] download ${filename}: bytes ${start}-${end} of ${total}`);
   res.writeHead(range ? 206 : 200, headers);
   res.end(chunk);
 }
