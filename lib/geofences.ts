@@ -24,7 +24,10 @@ export type GeofenceInput = z.infer<typeof geofenceSchema>;
 
 // GeoJSON polygon (WGS84, longitude first) with the ring closed.
 export function toPolygonGeoJson(points: GeofenceInput['points']): string {
-  const ring = points.map((p) => [p.lng, p.lat]);
+  // A corner placed twice in a row adds nothing to the shape.
+  const ring = points
+    .map((p) => [p.lng, p.lat])
+    .filter((c, i, all) => i === 0 || c[0] !== all[i - 1][0] || c[1] !== all[i - 1][1]);
   const first = ring[0];
   const last = ring[ring.length - 1];
   if (first[0] !== last[0] || first[1] !== last[1]) ring.push([...first]);
@@ -34,10 +37,15 @@ export function toPolygonGeoJson(points: GeofenceInput['points']): string {
 
 // A shape whose edges cross themselves is not a usable zone.
 export async function isValidPolygon(polygonGeoJson: string): Promise<boolean> {
-  const rows = await prisma.$queryRaw<{ valid: boolean }[]>`
-    SELECT ST_IsValid(ST_SetSRID(ST_GeomFromGeoJSON(${polygonGeoJson}), 4326)) AS valid
-  `;
-  return rows[0]?.valid === true;
+  try {
+    const rows = await prisma.$queryRaw<{ valid: boolean }[]>`
+      SELECT ST_IsValid(ST_SetSRID(ST_GeomFromGeoJSON(${polygonGeoJson}), 4326)) AS valid
+    `;
+    return rows[0]?.valid === true;
+  } catch {
+    // PostGIS rejects a ring of fewer than 3 distinct corners outright
+    return false;
+  }
 }
 
 interface GeofenceRow {

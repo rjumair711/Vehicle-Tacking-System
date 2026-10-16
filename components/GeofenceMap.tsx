@@ -28,12 +28,15 @@ interface GeofenceMapProps {
   fallbackCenter?: Point;
 }
 
+// Re-measures the map whenever its box changes size, e.g. while a sheet's
+// open animation is still running, so it never keeps grey tiles.
 function FixMapSize() {
   const map = useMap();
 
   useEffect(() => {
-    const timer = setTimeout(() => map.invalidateSize(), 200);
-    return () => clearTimeout(timer);
+    const observer = new ResizeObserver(() => map.invalidateSize());
+    observer.observe(map.getContainer());
+    return () => observer.disconnect();
   }, [map]);
 
   return null;
@@ -89,7 +92,13 @@ export function GeofenceMap({
 
   return (
     <div className="h-full w-full">
-      <MapContainer center={center} zoom={12} scrollWheelZoom className="h-full w-full">
+      <MapContainer
+        center={center}
+        zoom={12}
+        scrollWheelZoom
+        doubleClickZoom={!isDrawing}
+        className="h-full w-full"
+      >
         <FixMapSize />
 
         <TileLayer
@@ -117,7 +126,14 @@ export function GeofenceMap({
 
         {isDrawing && (
           <>
-            <ClickToAddCorner onAdd={(point) => onDrawingChange([...drawing, point])} />
+            <ClickToAddCorner
+              onAdd={(point) => {
+                // a double-click fires two clicks on the same spot
+                const last = drawing[drawing.length - 1];
+                if (last && last.lat === point.lat && last.lng === point.lng) return;
+                onDrawingChange([...drawing, point]);
+              }}
+            />
 
             {drawing.length >= 3 && (
               <Polygon

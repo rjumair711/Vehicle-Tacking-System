@@ -71,10 +71,11 @@ type RoutePoint = {
 function FixMapSize() {
   const map = useMap();
 
+  // Re-measure whenever the map's box changes size, not just once on mount.
   useEffect(() => {
-    setTimeout(() => {
-      map.invalidateSize();
-    }, 200);
+    const observer = new ResizeObserver(() => map.invalidateSize());
+    observer.observe(map.getContainer());
+    return () => observer.disconnect();
   }, [map]);
 
   return null;

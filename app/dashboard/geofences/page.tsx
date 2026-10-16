@@ -181,7 +181,8 @@ export default function GeofencesPage() {
               Click the map to place each corner of the zone, going around its edge
             </SheetDescription>
           </SheetHeader>
-          <div className="flex-1 overflow-y-auto px-5 pb-8">
+          {/* min-h-0 lets this flex child shrink, so it scrolls instead of being cut off */}
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-8">
             {isSheetOpen && (
               <GeofenceForm
                 key={editing?.id ?? 'new'}
