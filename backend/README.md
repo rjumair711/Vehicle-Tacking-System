@@ -869,6 +869,7 @@ Each entry lists the symptom, the cause, the fix, and whether it's resolved.
 - **Token lookup for OTA:** the update check has no device ID, so the token is compared with every active tracker's hash. Fine for a small fleet; a large one would want the device ID in the request.
 - **One process:** live pushes reach only the dashboards connected to this process, so the backend must run as a single instance.
 - **TLS isn't enforced by the app itself** (the edge provides it).
+- **Geofence checks use points only:** a crossing is detected when one point is inside a zone and the previous one outside. At 30 km/h the tracker moves ~42 m between 5 s records, so a zone narrower than that can be crossed without either point landing inside it, and no alert is raised. Checking the line between the two points (`ST_Intersects` on the segment) would close this gap.
 
 **Differences from the proposal document**
 - **WebSocket:** implemented (`/ws`).
@@ -876,6 +877,32 @@ Each entry lists the symptom, the cause, the fix, and whether it's resolved.
 - **Session model:** the document describes one TLS session reused across sends; the firmware opens one per record.
 - **Token location:** the document puts the token in the payload; here it's in the header.
 - **Storage size:** Table 5.1 assumes 1 GB of storage; the board has ~1.4 MB of LittleFS (buffer capped at 1 MB).
+
+**Future improvement: GPS drift** (written 16 Oct 2026, not implemented)
+
+*Measured on the 9 Oct test (parked periods, distance from each period's mean position):*
+
+| Parked period (UTC) | Points | Average | Worst |
+|---|---|---|---|
+| 07:39–07:43 | 43 | 2.7–3.3 m | 8.7 m |
+| 07:48–07:49 | 10 | 8.7 m | 13.5 m |
+| 07:50–08:28 | 19 | 11.5 m | 24.3 m |
+| 08:40–09:05 | 142 | 0.6 m | 8.8 m |
+
+One more point at 07:50:09 was a data error, not drift: its longitude read 73.0**7**91071 instead of 73.0**6**91071, a single changed digit and a 928 m jump that reversed 6 s later. That points to a corrupted byte on the modem UART. The firmware accepts any fix the modem reports; it doesn't check HDOP, satellite count or whether the jump is possible.
+
+*Limit of the hardware:* the A7608E-H GNSS is single-band (L1), about 2.5 m CEP under open sky. A ±1 m (4 m²) target isn't reachable with it. Software removes the random jitter between readings but not the slowly changing bias (atmosphere, signals reflected off buildings), so absolute error stays around 2–5 m.
+
+*Software methods, in order of value:*
+1. **Reject bad fixes (firmware):** drop a fix with HDOP above ~2.5, fewer than ~6 satellites, or a jump implying more than ~150 km/h. This would have caught the 928 m error.
+2. **Parked hold (firmware, MPU6050):** when the accelerometer shows no motion and speed is under ~2 km/h, send the running average of the parked fixes instead of each new one. Averaging N fixes shrinks the random part by about √N; parked drift drops to ~0–1 m.
+3. **Kalman filter (firmware or backend):** predict from position, speed and course, then blend with each fix, weighted by HDOP. Smooths the moving track; doesn't remove bias. If done on the backend, keep the raw points as well.
+4. **Geofence buffer and dwell (backend):** count "Entered" only once a point is more than ~5 m inside the zone and "Left" once it is more than ~5 m outside, optionally after 2–3 points in a row. This stops repeated enter/leave alerts at the edge, whatever the GPS does.
+5. **Map matching (backend or dashboard, optional):** snap trip routes to roads (e.g. OSRM) for a cleaner trip history.
+
+Plan: 1 and 2 in firmware (3.6.7, via OTA), 4 in `tracker-api.js`, 5 later. Also mount an active antenna with a clear sky view and a ground plane, and enable GPS + GLONASS + Galileo + BeiDou (and SBAS if supported) on the modem; see the A76xx GNSS AT manual for the command values.
+
+*Hardware upgrade path (separate module on a spare ESP32 UART; the A7608 stays for 4G):* a dual-band L1/L5 module (e.g. u-blox NEO-F10N, ~1–1.5 m CEP), or RTK (u-blox ZED-F9P or Quectel LC29H(DA), ~1–2 cm) with NTRIP corrections over 4G from a base station within ~20–30 km. RTK is the only reliable way under 1 m.
 
 ---
 
