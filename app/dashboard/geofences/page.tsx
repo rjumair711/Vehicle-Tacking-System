@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Plus, Edit2, Trash2, Undo2 } from 'lucide-react';
+import { selfIntersects, withoutRepeats } from '@/lib/polygon';
 
 const GeofenceMap = dynamic(
   () => import('@/components/GeofenceMap').then((m) => m.GeofenceMap),
@@ -178,7 +179,9 @@ export default function GeofencesPage() {
           <SheetHeader className="px-5 pr-14">
             <SheetTitle>{editing ? 'Edit Geofence' : 'Create Geofence'}</SheetTitle>
             <SheetDescription>
-              Click the map to place each corner of the zone, going around its edge
+              {editing
+                ? 'Drag the corners to reshape the zone'
+                : 'Click the map to place each corner of the zone, going around its edge'}
             </SheetDescription>
           </SheetHeader>
           {/* min-h-0 lets this flex child shrink, so it scrolls instead of being cut off */}
@@ -210,27 +213,61 @@ interface GeofenceFormProps {
   onClose: () => void;
 }
 
+// The outline being edited. A new zone stays open (map clicks add corners)
+// until its first corner is clicked; a saved zone opens closed.
+interface Shape {
+  points: Point[];
+  closed: boolean;
+}
+
 function GeofenceForm({ geofence, trackers, otherGeofences, error, onSave, onClose }: GeofenceFormProps) {
-  const [formData, setFormData] = useState<GeofenceFormData>({
+  const [formData, setFormData] = useState<Omit<GeofenceFormData, 'points'>>({
     trackerId: geofence?.trackerId || trackers[0]?.trackerId || '',
     name: geofence?.name || '',
     description: geofence?.description || '',
     color: geofence?.color || '#3b82f6',
     alertOnEnter: geofence?.alertOnEnter ?? true,
     alertOnExit: geofence?.alertOnExit ?? true,
-    points: geofence?.points || [],
   });
+  const [shape, setShape] = useState<Shape>(() => ({
+    points: withoutRepeats(geofence?.points ?? []),
+    closed: geofence !== undefined,
+  }));
+  // Each edit pushes the shape before it, so Undo reverts one whole action.
+  const [history, setHistory] = useState<Shape[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
+  const changeShape = (points: Point[], closed: boolean) => {
+    setHistory((h) => [...h, shape]);
+    setShape({ points, closed });
+  };
+  const undo = () => {
+    if (history.length === 0) return;
+    setShape(history[history.length - 1]);
+    setHistory((h) => h.slice(0, -1));
+  };
+
+  const { points } = shape;
+  const crossing = selfIntersects(points);
   const selectedTracker = trackers.find((t) => t.trackerId === formData.trackerId);
-  const canSave = formData.points.length >= 3 && formData.name.trim() !== '' && formData.trackerId !== '';
+  const canSave =
+    points.length >= 3 && !crossing && formData.name.trim() !== '' && formData.trackerId !== '';
+
+  const hint =
+    points.length === 0
+      ? 'Click the map to place the first corner.'
+      : !shape.closed && points.length < 3
+        ? 'Keep clicking to place corners, at least 3.'
+        : !shape.closed
+          ? 'Click the first corner to finish the outline, or keep adding corners.'
+          : 'Drag a corner to move it. Drag or click a small edge handle to add a corner. Right-click, double-click or long-press a corner to delete it.';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSave) return;
 
     setIsSaving(true);
-    await onSave(formData);
+    await onSave({ ...formData, points });
     setIsSaving(false);
   };
 
@@ -274,15 +311,15 @@ function GeofenceForm({ geofence, trackers, otherGeofences, error, onSave, onClo
       <div>
         <div className="flex items-center justify-between">
           <label className="text-sm font-medium text-foreground">
-            Zone ({formData.points.length} {formData.points.length === 1 ? 'corner' : 'corners'})
+            Zone ({points.length} {points.length === 1 ? 'corner' : 'corners'})
           </label>
           <div className="flex gap-2">
             <Button
               type="button"
               variant="outline"
               size="sm"
-              disabled={formData.points.length === 0}
-              onClick={() => setFormData({ ...formData, points: formData.points.slice(0, -1) })}
+              disabled={history.length === 0}
+              onClick={undo}
             >
               <Undo2 className="mr-1 h-4 w-4" />
               Undo
@@ -291,8 +328,8 @@ function GeofenceForm({ geofence, trackers, otherGeofences, error, onSave, onClo
               type="button"
               variant="outline"
               size="sm"
-              disabled={formData.points.length === 0}
-              onClick={() => setFormData({ ...formData, points: [] })}
+              disabled={points.length === 0}
+              onClick={() => changeShape([], false)}
             >
               Clear
             </Button>
@@ -301,16 +338,20 @@ function GeofenceForm({ geofence, trackers, otherGeofences, error, onSave, onClo
         <div className="mt-2 h-[42vh] overflow-hidden rounded-lg border border-border">
           <GeofenceMap
             geofences={otherGeofences}
-            drawing={formData.points}
+            drawing={points}
+            closed={shape.closed}
             drawingColor={formData.color}
-            onDrawingChange={(points) => setFormData((prev) => ({ ...prev, points }))}
+            onDrawingChange={changeShape}
             fallbackCenter={selectedTracker?.location}
           />
         </div>
-        {formData.points.length < 3 && (
-          <p className="mt-1 text-xs text-muted-foreground">
-            Place at least 3 corners to make a zone.
+        {crossing ? (
+          <p className="mt-1 text-xs text-destructive">
+            The zone&apos;s edges cross each other. Move or delete corners until the outline
+            no longer crosses itself.
           </p>
+        ) : (
+          <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
         )}
       </div>
 
