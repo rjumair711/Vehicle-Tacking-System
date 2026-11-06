@@ -149,6 +149,15 @@ export async function PATCH(
           WHERE tracker_id = ${trackerId}
         `;
 
+
+        await tx.$executeRaw`
+  UPDATE tracker_share_links
+  SET revoked_at = NOW()
+  WHERE tracker_id = ${trackerId}
+    AND revoked_at IS NULL
+`;
+
+
         await tx.tracker.update({
           where: { trackerId },
           data: {
@@ -178,6 +187,7 @@ export async function PATCH(
         },
       });
     }
+
 
     return NextResponse.json({
       message: transferring
