@@ -1,81 +1,74 @@
+
 'use client';
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import AdminPageGuard from '@/components/AdminPageGuard';
 import { apiFetch, formatLastSeen, formatSpeed } from '@/lib/api';
 import { useLiveTrackers } from '@/lib/realtime';
 import { useAuth } from '@/lib/authContext';
-import { TrackingDevice } from '@/types';
+import { Customer } from '@/types';
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
+  Card, CardContent, CardHeader, CardTitle,
 } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
+  Sheet, SheetContent, SheetDescription,
+  SheetHeader, SheetTitle,
 } from '@/components/ui/sheet';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+  Dialog, DialogContent, DialogDescription,
+  DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
-  Smartphone,
-  WifiOff,
-  Clock,
-  Plus,
-  CarFront,
-  MapPin,
-  User,
-  Copy,
+  Smartphone, WifiOff, Plus, User, Clock,
+  Eye, EyeOff, Search, ArrowRightLeft,
 } from 'lucide-react';
 
-interface NewDeviceForm {
+type CustomerMode = 'existing' | 'new';
+
+type NewDeviceForm = {
   name: string;
   trackerId: string;
   licensePlate: string;
   secretToken: string;
-  customerEmail: string;
+  customerMode: CustomerMode;
+  customerId: string;
   customerName: string;
-}
+  customerEmail: string;
+  customerPassword: string;
+  confirmPassword: string;
+  customerCompany: string;
+};
 
-const initialFormState: NewDeviceForm = {
+const emptyForm: NewDeviceForm = {
   name: '',
   trackerId: '',
   licensePlate: '',
   secretToken: '',
-  customerEmail: '',
+  customerMode: 'existing',
+  customerId: '',
   customerName: '',
+  customerEmail: '',
+  customerPassword: '',
+  confirmPassword: '',
+  customerCompany: '',
 };
 
-interface CreatedCustomer {
-  name: string;
-  email: string;
-  created: boolean;
-  password: string | null;
-}
-
-// 64 hex characters, the same shape as AUTH_TOKEN in the firmware.
 function generateToken() {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+
+  return Array.from(bytes, (b) =>
+    b.toString(16).padStart(2, '0')
+  ).join('');
 }
 
 export default function DevicesPage() {
   const { user } = useAuth();
+
   const {
     data: devices,
     loading,
@@ -83,561 +76,961 @@ export default function DevicesPage() {
     refresh,
   } = useLiveTrackers();
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [isSheetOpen, setIsSheetOpen] = useState(false);
-  const [isAddDeviceOpen, setIsAddDeviceOpen] = useState(false);
-  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
-
-  const [newDevice, setNewDevice] = useState<NewDeviceForm>(initialFormState);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customerError, setCustomerError] = useState('');
+  const [form, setForm] = useState<NewDeviceForm>(emptyForm);
+  const [adding, setAdding] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
+  const [notice, setNotice] = useState('');
   const [actionError, setActionError] = useState('');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [destinationId, setDestinationId] = useState('');
+  const [query, setQuery] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
-  const [createdCustomer, setCreatedCustomer] = useState<CreatedCustomer | null>(null);
-  const [createdTrackerId, setCreatedTrackerId] = useState('');
+  const selected =
+    devices.find((device) => device.trackerId === selectedId) ?? null;
 
-  const selectedDevice = devices.find((d) => d.trackerId === selectedId) ?? null;
-
-  const getStatusColor = (status: TrackingDevice['status']) => {
-    switch (status) {
-      case 'online':
-        return 'default';
-      case 'offline':
-        return 'secondary';
-      default:
-        return 'outline';
+  const loadCustomers = useCallback(async () => {
+    try {
+      const data = await apiFetch('/api/users');
+      setCustomers(data.users || []);
+      setCustomerError('');
+    } catch (err: any) {
+      setCustomerError(err?.message || 'Could not load customers');
     }
+  }, []);
+
+  useEffect(() => {
+    void loadCustomers();
+  }, [loadCustomers]);
+
+  const setField = <K extends keyof NewDeviceForm>(
+    field: K,
+    value: NewDeviceForm[K]
+  ) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const onlineDevices = devices.filter((d) => d.status === 'online').length;
-  const offlineDevices = devices.filter((d) => d.status === 'offline').length;
-
-  const resetForm = () => {
-    setNewDevice(initialFormState);
+  const openAdd = () => {
+    setForm({
+      ...emptyForm,
+      customerMode: customers.length ? 'existing' : 'new',
+    });
     setFormError('');
+    setShowPassword(false);
+    setAdding(true);
   };
 
-  const setField = (field: keyof NewDeviceForm, value: string) =>
-    setNewDevice((prev) => ({ ...prev, [field]: value }));
+  const handleCreate = async () => {
+    setFormError('');
 
-  const handleAddDevice = async () => {
-    const payload = {
-      name: newDevice.name.trim(),
-      trackerId: newDevice.trackerId.trim(),
-      licensePlate: newDevice.licensePlate.trim() || undefined,
-      secretToken: newDevice.secretToken.trim(),
-      customerEmail: newDevice.customerEmail.trim(),
-      customerName: newDevice.customerName.trim() || undefined,
-    };
-
-    if (!payload.name || !payload.trackerId || !payload.secretToken || !payload.customerEmail) {
-      setFormError('Vehicle name, Tracker ID, device token and customer email are required.');
+    if (
+      !form.name.trim() ||
+      !form.trackerId.trim() ||
+      !form.secretToken.trim()
+    ) {
+      setFormError(
+        'Vehicle name, tracker ID and device token are required.'
+      );
       return;
     }
 
-    try {
-      setIsSaving(true);
-      setFormError('');
+    if (form.customerMode === 'existing' && !form.customerId) {
+      setFormError('Select an existing customer.');
+      return;
+    }
 
-      const data = await apiFetch('/api/trackers', {
+    if (form.customerMode === 'new') {
+      if (!form.customerName.trim() || !form.customerEmail.trim()) {
+        setFormError('Customer name and email are required.');
+        return;
+      }
+
+      if (
+        form.customerPassword.length < 8 ||
+        form.customerPassword.length > 128
+      ) {
+        setFormError(
+          'Customer password must be 8–128 characters.'
+        );
+        return;
+      }
+
+      if (form.customerPassword !== form.confirmPassword) {
+        setFormError('Customer passwords do not match.');
+        return;
+      }
+    }
+
+    setSaving(true);
+
+    try {
+      const payload = {
+        name: form.name.trim(),
+        trackerId: form.trackerId.trim(),
+        licensePlate: form.licensePlate.trim(),
+        secretToken: form.secretToken.trim(),
+        customerMode: form.customerMode,
+        ...(form.customerMode === 'existing'
+          ? {
+              customerId: Number(form.customerId),
+            }
+          : {
+              customerName: form.customerName.trim(),
+              customerEmail: form.customerEmail.trim(),
+              customerPassword: form.customerPassword,
+              customerCompany: form.customerCompany.trim(),
+            }),
+      };
+
+      await apiFetch('/api/trackers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
-      setCreatedCustomer(data.customer);
-      setCreatedTrackerId(payload.trackerId);
-      setIsAddDeviceOpen(false);
-      resetForm();
+      setAdding(false);
+      setForm(emptyForm);
+      setNotice(
+        'Device registered and assigned successfully. Customer login password was not changed.'
+      );
+
+      await loadCustomers();
       refresh();
     } catch (err: any) {
-      setFormError(err?.message || 'Failed to add device');
+      setFormError(err?.message || 'Unable to register device');
     } finally {
-      setIsSaving(false);
+      setSaving(false);
     }
   };
 
-  const handleToggleEnabled = async (device: TrackingDevice) => {
-    try {
-      setActionError('');
-      await apiFetch(`/api/trackers/${encodeURIComponent(device.trackerId)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: device.status === 'suspended' ? 'ACTIVE' : 'SUSPENDED' }),
-      });
-      refresh();
-    } catch (err: any) {
-      setActionError(err?.message || 'Failed to update device');
-    }
-  };
+  const handleTransfer = async () => {
+    if (!selected || !destinationId) return;
 
-  const handleDeleteDevice = async () => {
-    if (!selectedDevice) return;
+    setSaving(true);
+    setActionError('');
 
     try {
-      setActionError('');
-      await apiFetch(`/api/trackers/${encodeURIComponent(selectedDevice.trackerId)}`, {
-        method: 'DELETE',
-      });
-      setIsDeleteOpen(false);
-      setIsSheetOpen(false);
+      await apiFetch(
+        `/api/trackers/${encodeURIComponent(selected.trackerId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: Number(destinationId),
+          }),
+        }
+      );
+
+      setTransferOpen(false);
+      setDetailsOpen(false);
       setSelectedId(null);
+      setDestinationId('');
+
+      setNotice(
+        'Tracker transferred. Existing location history is preserved; old sharing invitations are revoked.'
+      );
+
+      await loadCustomers();
       refresh();
     } catch (err: any) {
-      setIsDeleteOpen(false);
-      setActionError(err?.message || 'Failed to delete device');
+      setActionError(err?.message || 'Unable to transfer tracker');
+    } finally {
+      setSaving(false);
     }
   };
+
+  const handleStatus = async () => {
+    if (!selected) return;
+
+    setSaving(true);
+    setActionError('');
+
+    try {
+      await apiFetch(
+        `/api/trackers/${encodeURIComponent(selected.trackerId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            status:
+              selected.status === 'suspended'
+                ? 'ACTIVE'
+                : 'SUSPENDED',
+          }),
+        }
+      );
+
+      setNotice('Device status updated');
+      refresh();
+    } catch (err: any) {
+      setActionError(err?.message || 'Could not update device');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!selected) return;
+
+    setSaving(true);
+    setActionError('');
+
+    try {
+      await apiFetch(
+        `/api/trackers/${encodeURIComponent(selected.trackerId)}`,
+        { method: 'DELETE' }
+      );
+
+      setDeleteOpen(false);
+      setDetailsOpen(false);
+      setSelectedId(null);
+
+      setNotice('Device deleted.');
+      refresh();
+      await loadCustomers();
+    } catch (err: any) {
+      setActionError(err?.message || 'Could not delete device');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const currentOwnerEmail =
+    selected?.customer?.email?.toLowerCase();
+
+  const transferTargets = customers.filter(
+    (customer) =>
+      customer.email.toLowerCase() !== currentOwnerEmail
+  );
+
+  const filtered = devices.filter((device) =>
+    [
+      device.name,
+      device.trackerId,
+      device.licensePlate,
+      device.customer?.name,
+      device.customer?.email,
+    ].some((value) =>
+      (value || '').toLowerCase().includes(query.toLowerCase())
+    )
+  );
+
+  const online = devices.filter(
+    (device) => device.status === 'online'
+  ).length;
+
+  const offline = devices.filter(
+    (device) => device.status === 'offline'
+  ).length;
 
   return (
     <AdminPageGuard>
       <div className="space-y-6 p-4 sm:p-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Tracking Devices</h1>
-            <p className="mt-2 text-muted-foreground">
-              Register trackers and assign them to customers
+            <h1 className="text-3xl font-bold">
+              Tracking Devices
+            </h1>
+            <p className="text-muted-foreground">
+              Register, monitor and transfer GPS devices
             </p>
           </div>
 
-          <Button
-            onClick={() => {
-              resetForm();
-              setIsAddDeviceOpen(true);
-            }}
-            className="sm:w-auto"
-          >
+          <Button onClick={openAdd}>
             <Plus className="mr-2 h-4 w-4" />
             Add Device
           </Button>
         </div>
 
-        {(error || actionError) && (
-          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {error || actionError}
-          </div>
+        {(error || actionError || customerError) && (
+          <p
+            role="alert"
+            className="rounded-md border border-destructive/40 p-3 text-sm text-destructive"
+          >
+            {error || actionError || customerError}
+          </p>
+        )}
+
+        {notice && (
+          <p role="status" className="rounded-md border p-3 text-sm">
+            {notice}
+          </p>
         )}
 
         <div className="grid gap-4 sm:grid-cols-3">
-          <Card className="border-border bg-card">
+          <Card>
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm">
-                <Smartphone className="h-4 w-4 text-primary" />
+                <Smartphone className="h-4 w-4" />
                 Online
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold text-foreground">{onlineDevices}</p>
+            <CardContent className="text-2xl font-bold">
+              {online}
             </CardContent>
           </Card>
 
-          <Card className="border-border bg-card">
+          <Card>
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm">
-                <WifiOff className="h-4 w-4 text-destructive" />
+                <WifiOff className="h-4 w-4" />
                 Offline
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold text-destructive">{offlineDevices}</p>
+            <CardContent className="text-2xl font-bold">
+              {offline}
             </CardContent>
           </Card>
 
-          <Card className="border-border bg-card">
+          <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Total Devices</CardTitle>
+              <CardTitle className="text-sm">
+                Total Devices
+              </CardTitle>
             </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold text-foreground">{devices.length}</p>
+            <CardContent className="text-2xl font-bold">
+              {devices.length}
             </CardContent>
           </Card>
         </div>
 
-        {!loading && !error && devices.length === 0 && (
+        {/* Search */}
+        <div className="relative max-w-lg">
+          <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+          <Input
+            className="pl-9"
+            aria-label="Search devices"
+            placeholder="Search vehicle, tracker ID or customer"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+
+        {loading && (
           <p className="text-sm text-muted-foreground">
-            No devices registered yet. Use Add Device to register your first tracker.
+            Loading devices...
           </p>
         )}
 
+        {!loading && filtered.length === 0 && (
+          <p className="rounded-xl border p-8 text-center text-sm text-muted-foreground">
+            {query
+              ? 'No matching devices.'
+              : 'No registered devices. Choose Add Device to start.'}
+          </p>
+        )}
+
+        {/* Devices list */}
         <div className="space-y-3">
-          {devices.map((device) => (
+          {filtered.map((device) => (
             <button
+              type="button"
               key={device.trackerId}
               onClick={() => {
                 setSelectedId(device.trackerId);
-                setIsSheetOpen(true);
+                setDetailsOpen(true);
+                setActionError('');
               }}
-              className="w-full rounded-lg border border-border bg-card p-4 text-left transition-colors hover:bg-muted"
+              className="w-full rounded-xl border bg-card p-4 text-left transition hover:bg-muted/40"
             >
-              <div className="grid gap-4 md:grid-cols-5">
-                <div className="md:col-span-2">
-                  <p className="font-semibold text-foreground">{device.name ?? device.trackerId}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Tracker ID: {device.trackerId}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="font-semibold">
+                    {device.name || device.trackerId}
                   </p>
-                  {device.licensePlate && (
-                    <p className="text-xs text-muted-foreground">{device.licensePlate}</p>
-                  )}
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {device.trackerId} ·{' '}
+                    {device.licensePlate || 'No plate provided'}
+                  </p>
                 </div>
 
-                <div className="md:col-span-1">
-                  <Badge variant={getStatusColor(device.status)}>
-                    {device.status.toUpperCase()}
-                  </Badge>
-                </div>
+                <Badge
+                  variant={
+                    device.status === 'online'
+                      ? 'default'
+                      : 'secondary'
+                  }
+                >
+                  {device.status.toUpperCase()}
+                </Badge>
 
-                <div className="md:col-span-2 flex items-center justify-between gap-4">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <User className="h-4 w-4 shrink-0 text-primary" />
-                    <span className="truncate text-sm text-foreground">
-                      {device.customer?.name ?? '—'}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-primary" />
-                    <span className="text-sm text-muted-foreground">
-                      {formatLastSeen(device.lastSeen)}
-                    </span>
-                  </div>
-                </div>
+                <p className="flex items-center gap-2 text-sm">
+                  <User className="h-4 w-4" />
+                  {device.customer?.name || 'Unassigned'}
+                </p>
+
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Clock className="h-4 w-4" />
+                  {formatLastSeen(device.lastSeen)}
+                </p>
               </div>
             </button>
           ))}
         </div>
 
-        {/* Device details */}
-        <Sheet open={isSheetOpen} onOpenChange={setIsSheetOpen}>
-          <SheetContent
-            side="bottom"
-            className="mx-auto flex h-[85vh] max-h-[85vh] flex-col overflow-hidden sm:max-w-2xl"
-          >
-            {selectedDevice ? (
-              <>
-                <SheetHeader className="shrink-0 px-5 pr-14">
-                  <SheetTitle>{selectedDevice.name ?? selectedDevice.trackerId}</SheetTitle>
-                  <SheetDescription>Device Information</SheetDescription>
-                </SheetHeader>
-
-                <div className="flex-1 overflow-y-auto px-5 pb-8">
-                  <div className="mt-6 grid gap-4 md:grid-cols-2">
-                    <Card className="border-border bg-muted/50">
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-sm">Device Status</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <Badge variant={getStatusColor(selectedDevice.status)}>
-                          {selectedDevice.status.toUpperCase()}
-                        </Badge>
-                      </CardContent>
-                    </Card>
-
-                    <Card className="border-border bg-muted/50">
-                      <CardHeader className="pb-2">
-                        <CardTitle className="text-sm">Tracker ID</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <p className="break-all font-mono text-sm text-foreground">
-                          {selectedDevice.trackerId}
-                        </p>
-                      </CardContent>
-                    </Card>
-
-                    <Card className="border-border">
-                      <CardHeader className="pb-2">
-                        <CardTitle className="flex items-center gap-2 text-sm">
-                          <Clock className="h-4 w-4" />
-                          Last Seen
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <p className="text-sm text-foreground">
-                          {selectedDevice.lastSeen
-                            ? selectedDevice.lastSeen.toLocaleString()
-                            : 'No record received yet'}
-                        </p>
-                      </CardContent>
-                    </Card>
-
-                    <Card className="border-border">
-                      <CardHeader className="pb-2">
-                        <CardTitle className="flex items-center gap-2 text-sm">
-                          <MapPin className="h-4 w-4" />
-                          Last Position
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        {selectedDevice.location ? (
-                          <div className="space-y-1">
-                            <p className="font-mono text-sm text-foreground">
-                              {selectedDevice.location.lat.toFixed(5)},{' '}
-                              {selectedDevice.location.lng.toFixed(5)}
-                            </p>
-                            <p className="text-sm text-muted-foreground">
-                              {formatSpeed(selectedDevice.location.speed, user?.speedUnit)}
-                            </p>
-                          </div>
-                        ) : (
-                          <p className="text-sm text-muted-foreground">No position received yet</p>
-                        )}
-                      </CardContent>
-                    </Card>
-
-                    <Card className="border-border">
-                      <CardHeader className="pb-2">
-                        <CardTitle className="flex items-center gap-2 text-sm">
-                          <CarFront className="h-4 w-4" />
-                          Vehicle
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <p className="font-medium text-foreground">
-                          {selectedDevice.name ?? '—'}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          License Plate: {selectedDevice.licensePlate ?? 'N/A'}
-                        </p>
-                      </CardContent>
-                    </Card>
-
-                    <Card className="border-border">
-                      <CardHeader className="pb-2">
-                        <CardTitle className="flex items-center gap-2 text-sm">
-                          <User className="h-4 w-4" />
-                          Customer
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <p className="font-medium text-foreground">
-                          {selectedDevice.customer?.name ?? '—'}
-                        </p>
-                        <p className="break-all text-xs text-muted-foreground">
-                          {selectedDevice.customer?.email}
-                        </p>
-                      </CardContent>
-                    </Card>
-                  </div>
-
-                  <div className="mt-6 flex gap-2 pb-2">
-                    <Button
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => handleToggleEnabled(selectedDevice)}
-                    >
-                      {selectedDevice.status === 'suspended' ? 'Reactivate Device' : 'Suspend Device'}
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      className="flex-1"
-                      onClick={() => setIsDeleteOpen(true)}
-                    >
-                      Delete Device
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    A suspended device stays registered, but the records it sends are rejected.
-                  </p>
-                </div>
-              </>
-            ) : null}
-          </SheetContent>
-        </Sheet>
-
         {/* Add device */}
         <Sheet
-          open={isAddDeviceOpen}
+          open={adding}
           onOpenChange={(open) => {
-            setIsAddDeviceOpen(open);
-            if (!open) {
-              resetForm();
-            }
+            if (!saving) setAdding(open);
           }}
         >
-          <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-lg px-6">
+          <SheetContent
+            side="right"
+            className="w-full overflow-y-auto px-6 sm:max-w-lg"
+          >
             <SheetHeader className="px-0">
-              <SheetTitle>Add Device</SheetTitle>
+              <SheetTitle>Register Device</SheetTitle>
               <SheetDescription>
-                Register a GPS tracker and assign it to a customer
+                Register hardware and assign it to an existing
+                or new customer.
               </SheetDescription>
             </SheetHeader>
 
-            <div className="mt-2 space-y-4 pb-8">
-              {formError ? (
-                <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <div className="space-y-4 pb-8 pt-5">
+              {formError && (
+                <p
+                  role="alert"
+                  className="rounded-md border border-destructive/40 p-3 text-sm text-destructive"
+                >
                   {formError}
-                </div>
-              ) : null}
+                </p>
+              )}
 
               <div className="space-y-2">
-                <Label htmlFor="vehicleName">Vehicle Name</Label>
+                <Label htmlFor="vehicleName">
+                  Vehicle Name
+                </Label>
                 <Input
                   id="vehicleName"
-                  placeholder="e.g. Toyota Corolla - #007"
-                  value={newDevice.name}
-                  onChange={(e) => setField('name', e.target.value)}
+                  placeholder="e.g. CD 70"
+                  value={form.name}
+                  onChange={(e) =>
+                    setField('name', e.target.value)
+                  }
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="licensePlate">License Plate (optional)</Label>
+                <Label htmlFor="plate">
+                  License Plate (optional)
+                </Label>
                 <Input
-                  id="licensePlate"
-                  placeholder="e.g. ICT-007"
-                  value={newDevice.licensePlate}
-                  onChange={(e) => setField('licensePlate', e.target.value)}
+                  id="plate"
+                  value={form.licensePlate}
+                  onChange={(e) =>
+                    setField('licensePlate', e.target.value)
+                  }
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="trackerId">Tracker ID</Label>
+                <Label htmlFor="trackerId">
+                  Tracker ID
+                </Label>
                 <Input
                   id="trackerId"
-                  placeholder="e.g. TRK-0001"
-                  value={newDevice.trackerId}
-                  onChange={(e) => setField('trackerId', e.target.value)}
+                  placeholder="TRK-0001"
+                  value={form.trackerId}
+                  onChange={(e) =>
+                    setField('trackerId', e.target.value)
+                  }
                 />
                 <p className="text-xs text-muted-foreground">
-                  Must equal DEVICE_ID in the tracker firmware.
+                  Must match DEVICE_ID in the device firmware.
                 </p>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="secretToken">Device Token</Label>
+                <Label htmlFor="token">
+                  Device Token
+                </Label>
+
                 <div className="flex gap-2">
                   <Input
-                    id="secretToken"
-                    className="font-mono text-xs"
-                    placeholder="AUTH_TOKEN from the firmware"
+                    id="token"
+                    className="min-w-0 font-mono text-xs"
                     autoComplete="off"
-                    value={newDevice.secretToken}
-                    onChange={(e) => setField('secretToken', e.target.value)}
+                    value={form.secretToken}
+                    onChange={(e) =>
+                      setField('secretToken', e.target.value)
+                    }
                   />
                   <Button
-                    type="button"
                     variant="outline"
-                    onClick={() => setField('secretToken', generateToken())}
+                    type="button"
+                    onClick={() =>
+                      setField('secretToken', generateToken())
+                    }
                   >
                     Generate
                   </Button>
                 </div>
+
                 <p className="text-xs text-muted-foreground">
-                  Must equal AUTH_TOKEN in the tracker firmware. Paste the firmware&apos;s token,
-                  or generate a new one and put it in the firmware before flashing. Only a hash
-                  is stored, so copy it now.
+                  Must match AUTH_TOKEN in the firmware.
+                  Copy before saving: only its hash is stored.
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="customerEmail">Customer Email</Label>
-                <Input
-                  id="customerEmail"
-                  type="email"
-                  placeholder="customer@example.com"
-                  value={newDevice.customerEmail}
-                  onChange={(e) => setField('customerEmail', e.target.value)}
-                />
+              {/* Customer selection */}
+              <div className="space-y-2 border-t pt-4">
+                <Label>Assign to</Label>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant={
+                      form.customerMode === 'existing'
+                        ? 'default'
+                        : 'outline'
+                    }
+                    onClick={() =>
+                      setField('customerMode', 'existing')
+                    }
+                  >
+                    Existing Customer
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant={
+                      form.customerMode === 'new'
+                        ? 'default'
+                        : 'outline'
+                    }
+                    onClick={() =>
+                      setField('customerMode', 'new')
+                    }
+                  >
+                    New Customer
+                  </Button>
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="customerName">Customer Name</Label>
-                <Input
-                  id="customerName"
-                  placeholder="Needed only for a new customer"
-                  value={newDevice.customerName}
-                  onChange={(e) => setField('customerName', e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  If no account exists for this email, one is created and its password is
-                  shown to you once.
-                </p>
-              </div>
+              {form.customerMode === 'existing' ? (
+                <div className="space-y-2">
+                  <Label htmlFor="existingCustomer">
+                    Select Customer
+                  </Label>
 
-              <div className="flex gap-2 pt-4">
+                  <select
+                    id="existingCustomer"
+                    className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                    value={form.customerId}
+                    onChange={(e) =>
+                      setField('customerId', e.target.value)
+                    }
+                  >
+                    <option value="">
+                      Choose a customer
+                    </option>
+
+                    {customers.map((customer) => (
+                      <option
+                        value={customer.id}
+                        key={customer.id}
+                      >
+                        {customer.name} — {customer.email}
+                      </option>
+                    ))}
+                  </select>
+
+                  {!customers.length && (
+                    <p className="text-xs text-muted-foreground">
+                      No customer accounts yet. Switch to
+                      New Customer to create one.
+                    </p>
+                  )}
+
+                  <p className="text-xs text-muted-foreground">
+                    The selected customer's password stays unchanged.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="newCustomerName">
+                      Customer Name
+                    </Label>
+                    <Input
+                      id="newCustomerName"
+                      value={form.customerName}
+                      onChange={(e) =>
+                        setField('customerName', e.target.value)
+                      }
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label htmlFor="newCustomerEmail">
+                      Customer Email
+                    </Label>
+                    <Input
+                      id="newCustomerEmail"
+                      type="email"
+                      autoComplete="off"
+                      value={form.customerEmail}
+                      onChange={(e) =>
+                        setField('customerEmail', e.target.value)
+                      }
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label htmlFor="newCustomerCompany">
+                      Company (optional)
+                    </Label>
+                    <Input
+                      id="newCustomerCompany"
+                      value={form.customerCompany}
+                      onChange={(e) =>
+                        setField('customerCompany', e.target.value)
+                      }
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label htmlFor="newPassword">
+                      Initial Password
+                    </Label>
+
+                    <div className="relative">
+                      <Input
+                        id="newPassword"
+                        className="pr-10"
+                        autoComplete="new-password"
+                        type={
+                          showPassword ? 'text' : 'password'
+                        }
+                        value={form.customerPassword}
+                        onChange={(e) =>
+                          setField(
+                            'customerPassword',
+                            e.target.value
+                          )
+                        }
+                      />
+
+                      <button
+                        type="button"
+                        aria-label={
+                          showPassword
+                            ? 'Hide password'
+                            : 'Show password'
+                        }
+                        className="absolute right-3 top-1/2 -translate-y-1/2"
+                        onClick={() =>
+                          setShowPassword((value) => !value)
+                        }
+                      >
+                        {showPassword ? (
+                          <EyeOff className="h-4 w-4" />
+                        ) : (
+                          <Eye className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label htmlFor="confirmPassword">
+                      Confirm Password
+                    </Label>
+                    <Input
+                      id="confirmPassword"
+                      autoComplete="new-password"
+                      type={
+                        showPassword ? 'text' : 'password'
+                      }
+                      value={form.confirmPassword}
+                      onChange={(e) =>
+                        setField(
+                          'confirmPassword',
+                          e.target.value
+                        )
+                      }
+                    />
+                  </div>
+
+                  <p className="text-xs text-muted-foreground">
+                    Set an initial password (8–128 characters).
+                    The customer can change it in Settings.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-3">
                 <Button
                   variant="outline"
                   className="flex-1"
-                  onClick={() => {
-                    setIsAddDeviceOpen(false);
-                    resetForm();
-                  }}
+                  disabled={saving}
+                  onClick={() => setAdding(false)}
                 >
                   Cancel
                 </Button>
-                <Button className="flex-1" onClick={handleAddDevice} disabled={isSaving}>
-                  {isSaving ? 'Saving...' : 'Save Device'}
+
+                <Button
+                  className="flex-1"
+                  disabled={saving}
+                  onClick={handleCreate}
+                >
+                  {saving
+                    ? 'Saving...'
+                    : 'Register & Assign'}
                 </Button>
               </div>
             </div>
           </SheetContent>
         </Sheet>
 
-        {/* Result of adding a device: the customer's login */}
+        {/* Device details */}
+        <Sheet
+          open={detailsOpen}
+          onOpenChange={setDetailsOpen}
+        >
+          <SheetContent
+            side="right"
+            className="w-full overflow-y-auto px-6 sm:max-w-lg"
+          >
+            {selected && (
+              <>
+                <SheetHeader className="px-0">
+                  <SheetTitle>
+                    {selected.name || selected.trackerId}
+                  </SheetTitle>
+                  <SheetDescription>
+                    Device details and customer ownership
+                  </SheetDescription>
+                </SheetHeader>
+
+                <div className="space-y-4 py-6 text-sm">
+                  <div className="rounded-lg border p-4">
+                    <p className="text-muted-foreground">
+                      Tracker ID
+                    </p>
+                    <p className="font-mono font-semibold">
+                      {selected.trackerId}
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-lg border p-3">
+                      <p className="text-muted-foreground">
+                        Status
+                      </p>
+                      <p className="font-semibold capitalize">
+                        {selected.status}
+                      </p>
+                    </div>
+
+                    <div className="rounded-lg border p-3">
+                      <p className="text-muted-foreground">
+                        Plate
+                      </p>
+                      <p className="font-semibold">
+                        {selected.licensePlate || 'Not set'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border p-4">
+                    <p className="text-muted-foreground">
+                      Assigned Customer
+                    </p>
+                    <p className="font-semibold">
+                      {selected.customer?.name || 'Unassigned'}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {selected.customer?.email}
+                    </p>
+                  </div>
+
+                  <div className="rounded-lg border p-4">
+                    <p className="text-muted-foreground">
+                      Last Seen
+                    </p>
+                    <p>{formatLastSeen(selected.lastSeen)}</p>
+
+                    {selected.location && (
+                      <p className="mt-2">
+                        Location:{' '}
+                        {selected.location.lat.toFixed(5)},{' '}
+                        {selected.location.lng.toFixed(5)}
+                        {' · '}
+                        {formatSpeed(
+                          selected.location.speed,
+                          user?.speedUnit
+                        )}
+                      </p>
+                    )}
+                  </div>
+
+                  <Button
+                    className="w-full"
+                    onClick={() => {
+                      setDestinationId('');
+                      setTransferOpen(true);
+                    }}
+                  >
+                    <ArrowRightLeft className="mr-2 h-4 w-4" />
+                    Transfer to Another Customer
+                  </Button>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      variant="outline"
+                      disabled={saving}
+                      onClick={handleStatus}
+                    >
+                      {selected.status === 'suspended'
+                        ? 'Reactivate'
+                        : 'Suspend'}
+                    </Button>
+
+                    <Button
+                      variant="destructive"
+                      disabled={saving}
+                      onClick={() => setDeleteOpen(true)}
+                    >
+                      Delete Device
+                    </Button>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground">
+                    Transfer changes ownership without deleting GPS
+                    records. Deleting a device removes its data and
+                    cannot be undone.
+                  </p>
+                </div>
+              </>
+            )}
+          </SheetContent>
+        </Sheet>
+
+        {/* Transfer confirmation */}
         <Dialog
-          open={createdCustomer !== null}
+          open={transferOpen}
           onOpenChange={(open) => {
-            if (!open) setCreatedCustomer(null);
+            if (!saving) setTransferOpen(open);
           }}
         >
-          <DialogContent className="sm:max-w-md">
+          <DialogContent>
             <DialogHeader>
-              <DialogTitle>Device {createdTrackerId} registered</DialogTitle>
+              <DialogTitle>
+                Transfer Tracker
+              </DialogTitle>
               <DialogDescription>
-                {createdCustomer?.created
-                  ? 'A customer account was created. Give these login details to the customer. The password is not shown again.'
-                  : `The device was assigned to the existing customer ${createdCustomer?.name}. Their password is unchanged.`}
+                Move {selected?.name || selected?.trackerId}
+                {' '}to a different customer. The old customer
+                and their shared viewers will lose access;
+                device history stays with the tracker.
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-2 rounded-lg border border-border bg-muted/50 p-4 text-sm">
-              <div className="flex justify-between gap-4">
-                <span className="text-muted-foreground">Email</span>
-                <span className="break-all font-mono">{createdCustomer?.email}</span>
-              </div>
-              {createdCustomer?.created && (
-                <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground">Password</span>
-                  <span className="font-mono">{createdCustomer.password}</span>
-                </div>
-              )}
-            </div>
+            {actionError && (
+              <p role="alert" className="text-sm text-destructive">
+                {actionError}
+              </p>
+            )}
 
-            <DialogFooter className="flex gap-2 sm:justify-end">
-              {createdCustomer?.created && (
-                <Button
-                  variant="outline"
-                  onClick={() =>
-                    navigator.clipboard?.writeText(
-                      `Email: ${createdCustomer.email}\nPassword: ${createdCustomer.password}`
-                    )
-                  }
+            <Label htmlFor="transferTarget">
+              New Owner
+            </Label>
+
+            <select
+              id="transferTarget"
+              className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+              value={destinationId}
+              onChange={(e) =>
+                setDestinationId(e.target.value)
+              }
+            >
+              <option value="">
+                Choose customer
+              </option>
+
+              {transferTargets.map((customer) => (
+                <option
+                  key={customer.id}
+                  value={customer.id}
                 >
-                  <Copy className="mr-2 h-4 w-4" />
-                  Copy
-                </Button>
-              )}
-              <Button onClick={() => setCreatedCustomer(null)}>Done</Button>
+                  {customer.name} — {customer.email}
+                </option>
+              ))}
+            </select>
+
+            {!transferTargets.length && (
+              <p className="text-xs text-muted-foreground">
+                Create another customer first, then transfer
+                the tracker.
+              </p>
+            )}
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                disabled={saving}
+                onClick={() => setTransferOpen(false)}
+              >
+                Cancel
+              </Button>
+
+              <Button
+                disabled={!destinationId || saving}
+                onClick={handleTransfer}
+              >
+                {saving
+                  ? 'Transferring...'
+                  : 'Confirm Transfer'}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
 
         {/* Delete confirmation */}
-        <Dialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
-          <DialogContent className="sm:max-w-md">
+        <Dialog
+          open={deleteOpen}
+          onOpenChange={(open) => {
+            if (!saving) setDeleteOpen(open);
+          }}
+        >
+          <DialogContent>
             <DialogHeader>
-              <DialogTitle>Delete Device</DialogTitle>
+              <DialogTitle>
+                Delete Device
+              </DialogTitle>
               <DialogDescription>
-                Delete{' '}
-                <span className="font-semibold text-foreground">
-                  {selectedDevice?.name ?? selectedDevice?.trackerId}
-                </span>
-                ? Its positions, trips and alerts are deleted too. This cannot be undone.
+                Delete {selected?.name || selected?.trackerId}?
+                Location history, trips and alerts may be
+                deleted. This cannot be undone. To change
+                customers, use Transfer instead.
               </DialogDescription>
             </DialogHeader>
-            <DialogFooter className="flex gap-2 sm:justify-end">
-              <Button variant="outline" onClick={() => setIsDeleteOpen(false)}>
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                disabled={saving}
+                onClick={() => setDeleteOpen(false)}
+              >
                 Cancel
               </Button>
-              <Button variant="destructive" onClick={handleDeleteDevice}>
-                Delete
+
+              <Button
+                variant="destructive"
+                disabled={saving}
+                onClick={handleDelete}
+              >
+                {saving
+                  ? 'Deleting...'
+                  : 'Delete Device'}
               </Button>
             </DialogFooter>
           </DialogContent>
