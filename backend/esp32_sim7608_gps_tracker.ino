@@ -91,7 +91,7 @@ const uint32_t DATA_RETRY_MS        = 60000;   // re-attach data if IP lost
 
 
 // Modem HTTP(S) timing
-const uint32_t HTTP_POST_WAIT_MS    = 30000;   // +HTTPACTION after a POST
+const uint32_t HTTP_POST_WAIT_MS    = 60000;   // +HTTPACTION after a POST (covers a Render wake-up)
 const uint32_t HTTP_GET_WAIT_MS     = 60000;   // +HTTPACTION after a GET
 const uint32_t HTTP_READ_WAIT_MS    = 10000;   // one AT+HTTPREAD chunk
 const size_t   MANIFEST_MAX_BYTES   = 2048;
@@ -558,7 +558,11 @@ int httpAction(int method, uint32_t waitMs, uint32_t& bodyLen) {
   int c2 = line.indexOf(',', c1 + 1);
   if (c1 < 0 || c2 < 0) return -5;
   bodyLen = (uint32_t)line.substring(c2 + 1).toInt();
-  return line.substring(c1 + 1, c2).toInt();
+  int status = line.substring(c1 + 1, c2).toInt();
+  if (status != 200 && status != 201 && status != 206) {
+    Serial.printf("[HTTP]  modem answered '%s'\r\n", line.c_str());
+  }
+  return status;
 }
 
 // Reads `want` bytes of the response body starting at `offset`.
@@ -1495,7 +1499,11 @@ void telemetryService(uint32_t now) {
 
 /* ================================== OTA ==================================== */
 bool otaFetchManifest(OtaManifest& m) {
-  if (!httpBegin(OTA_MANIFEST_URL)) { httpEnd(); return false; }
+  if (!httpBegin(OTA_MANIFEST_URL)) {
+    httpEnd();
+    Serial.println("[OTA] could not start the update check");
+    return false;
+  }
   uint32_t len = 0;
   int status = httpAction(0, HTTP_GET_WAIT_MS, len);   // 0 = GET
   String body;
@@ -1515,19 +1523,23 @@ bool otaFetchManifest(OtaManifest& m) {
   // "0 announced" with HTTP 200 means the server sent no Content-Length.
   Serial.printf("[OTA] manifest HTTP %d, %lu bytes announced, %u read\r\n",
                 status, (unsigned long)len, body.length());
-  if (status != 200 || body.length() == 0) return false;
+  if (status == 404) { Serial.println("[OTA] no firmware uploaded on the server yet"); return false; }
+  if (status != 200 || body.length() == 0) { Serial.println("[OTA] could not read manifest"); return false; }
 
   StaticJsonDocument<384> doc;
-  if (deserializeJson(doc, body)) return false;
+  DeserializationError bad = deserializeJson(doc, body);
   const char* v = doc["version"];
   const char* u = doc["url"];
   const char* s = doc["sha256"];
-  if (!v || !u || !s) return false;
+  m.size = doc["size"] | 0;
+  if (bad || !v || !u || !s || m.size == 0) {
+    Serial.println("[OTA] manifest is not valid");
+    return false;
+  }
   m.version = v;
   m.url = u;
   m.sha256 = s;
-  m.size = doc["size"] | 0;
-  return m.size > 0;
+  return true;
 }
 
 // true if version a is newer than version b ("1.2.0" > "1.1.9")
@@ -1632,8 +1644,7 @@ bool otaSafeToUpdate(void) {
   bool noCrash = !g_crash.pending && !g_crashAwaitingRecord;
   bool bufferEmpty = g_buffer.count == 0;
   if (parked && network && noCrash && bufferEmpty) return true;
-  Serial.printf("[OTA] postponed:%s%s%s%s%s
-",
+  Serial.printf("[OTA] postponed:%s%s%s%s%s\r\n",
                 !g_fix.valid ? " no GPS fix;" : "",
                 (g_fix.valid && !parked) ? " vehicle moving;" : "",
                 network ? "" : " weak or no network;",
@@ -1644,7 +1655,7 @@ bool otaSafeToUpdate(void) {
 
 void otaCheck(void) {
   OtaManifest m;
-  if (!otaFetchManifest(m)) { Serial.println("[OTA] could not read manifest"); return; }
+  if (!otaFetchManifest(m)) return;   // it prints why
   Serial.printf("[OTA] running %s, server has %s\r\n", FW_VERSION, m.version.c_str());
   if (!otaIsNewer(m.version, FW_VERSION)) { Serial.println("[OTA] up to date"); return; }
   if (!otaSafeToUpdate()) return;   // it prints why
