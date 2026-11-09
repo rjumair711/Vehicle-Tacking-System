@@ -1,5 +1,5 @@
 /*
- * K-Track Vehicle Tracker Firmware  v4.0.0
+ * K-Track Vehicle Tracker Firmware  v4.0.1
  * ESP32 + MPU6050 + SIMCom A7608E-H (4G LTE + GNSS)
  *
  * - MPU6050 at 100 Hz on core 0 with bias calibration and crash detection; a
@@ -27,6 +27,17 @@
  *   - bufferMount() reconciles saved cursor state against complete JSONL
  *     records after power loss; recovery may scan all segments.
  *
+ * Fixes in 4.0.1 (tracker stuck on -4 then 706):
+ *   - The first request after power-on often hits the Render backend while it
+ *     is still waking up (up to ~60 s). The old 30 s wait gave up (-4) and
+ *     closed the HTTP session while the modem was still mid-request, which
+ *     left its socket broken so every later request failed with 706.
+ *   - HTTP waits are now 90 s, and the modem's own connect/receive timeouts
+ *     are set below that, so the modem always answers first.
+ *   - After a -4, or 2 modem socket errors (7xx) in a row, the mobile data
+ *     session is reset (AT+CGACT off/on) and TLS re-configured, at most once
+ *     per HTTP_RECOVER_GAP_MS.
+ *
  * Wiring: MPU6050 SDA->GPIO21, SCL->GPIO22. A7608E-H TX->GPIO16, RX->GPIO17.
  * Arduino IDE: "ESP32 Dev Module", partition "Default 4MB with spiffs",
  * Serial Monitor 115200. Library: ArduinoJson.
@@ -46,7 +57,7 @@
 #include <Preferences.h> 
 
 /* ============================== CONFIGURATION ============================== */
-const char* FW_VERSION    = "4.0.0";
+const char* FW_VERSION    = "4.0.1";
 
 // Factory defaults — only used on the very first USB flash when NVS is empty.
 // Change these before flashing each individual tracker, then every OTA update
@@ -116,8 +127,17 @@ const uint32_t GNSS_INFO_POLL_MS    = 3000;
 const uint32_t DATA_RETRY_MS        = 60000;   // re-attach data if IP lost
 
 // Modem HTTP(S) timing
-const uint32_t HTTP_POST_WAIT_MS    = 30000;   // +HTTPACTION after a POST
-const uint32_t HTTP_GET_WAIT_MS     = 60000;   // +HTTPACTION after a GET
+// Render's free plan sleeps when idle and needs up to ~60 s to wake, so the
+// waits must cover that. The modem's own timeouts (seconds) are kept below
+// the firmware wait so the modem always reports first, never mid-request.
+const uint32_t HTTP_POST_WAIT_MS    = 90000;   // +HTTPACTION after a POST
+const uint32_t HTTP_GET_WAIT_MS     = 90000;   // +HTTPACTION after a GET
+const uint32_t HTTP_CONNECT_TO_S    = 60;      // AT+HTTPPARA="CONNECTTO"
+const uint32_t HTTP_RECV_TO_S       = 80;      // AT+HTTPPARA="RECVTO"
+// Modem socket recovery: reset mobile data after a timeout (-4) or this many
+// 7xx modem errors in a row, but not more often than HTTP_RECOVER_GAP_MS.
+const uint32_t HTTP_MODEM_ERR_LIMIT = 2;
+const uint32_t HTTP_RECOVER_GAP_MS  = 60000;
 const uint32_t HTTP_READ_WAIT_MS    = 10000;   // one AT+HTTPREAD chunk
 const size_t   MANIFEST_MAX_BYTES   = 2048;
 
@@ -302,6 +322,10 @@ TaskHandle_t g_imuTaskHandle = nullptr;
 uint64_t     g_crashEventUtcMs = 0;  // original crash time, if GPS clock was known
 uint32_t     g_lastFullLogMs = 0;
 uint32_t     g_lastHttpFailureMs = 0;
+int          g_lastHttpStatus = 0;      // result of the current session's HTTPACTION
+uint32_t     g_httpModemErrors = 0;     // -4 / 7xx results in a row
+uint32_t     g_lastHttpRecoverMs = 0;
+bool         g_httpRecovered = false;   // a recovery has run at least once
 
 struct PerfCounters {
   uint32_t loopMaxMs = 0;
@@ -735,8 +759,23 @@ void modemConfigureTls(void) {
 // Authorization header: the modem sends a "\r\n" typed into it literally, so
 // a second header can't be added. The OTA byte range goes in the URL instead.
 bool httpBegin(const String& url) {
+  g_lastHttpStatus = 0;
   atCommand("AT+HTTPTERM", 1000);   // close any leftover session (ERROR is ok)
-  if (!atOk("AT+HTTPINIT", 5000)) return false;
+  if (!atOk("AT+HTTPINIT", 5000)) {
+    g_lastHttpStatus = -1;          // HTTP stack refused to start: counts as a modem error
+    return false;
+  }
+
+  // Modem-side connect / receive timeouts, kept below the firmware's wait so
+  // the modem reports a result instead of being cut off mid-request. Modules
+  // that don't know these parameters answer ERROR, which is harmless.
+  {
+    char cmd[48];
+    snprintf(cmd, sizeof(cmd), "AT+HTTPPARA=\"CONNECTTO\",%lu", (unsigned long)HTTP_CONNECT_TO_S);
+    atOk(cmd);
+    snprintf(cmd, sizeof(cmd), "AT+HTTPPARA=\"RECVTO\",%lu", (unsigned long)HTTP_RECV_TO_S);
+    atOk(cmd);
+  }
 
   // Build URL param with a char[] to avoid two String concatenations.
   {
@@ -757,8 +796,45 @@ bool httpBegin(const String& url) {
   return true;
 }
 
+// Restarts the mobile data session: drops PDP context 1, brings it back and
+// re-applies the TLS settings. Clears a modem socket that a cut-off request
+// left broken (the "-4 then 706 forever" state).
+void modemResetDataSession(void) {
+  Serial.printf("[NET]   modem HTTP errors (last %d, %lu in a row): resetting mobile data\r\n",
+                g_lastHttpStatus, (unsigned long)g_httpModemErrors);
+  atCommand("AT+HTTPTERM", 3000);
+  atCommand("AT+CGACT=0,1", 40000);   // ERROR is fine if it was already down
+  delay(1000);
+  atOk("AT+CGACT=1,1", 30000);
+  g_modemIp = modemLocalIp();
+  modemConfigureTls();
+  g_lastHttpRecoverMs = millis();
+  g_httpRecovered = true;
+  g_httpModemErrors = 0;
+  Serial.printf("[NET]   mobile data %s after reset, IP %s\r\n",
+                g_modemIp != "none" ? "up" : "DOWN", g_modemIp.c_str());
+}
+
+// Tracks modem-side failures and resets the data session when the modem's
+// HTTP socket looks stuck. Real HTTP replies (any status 1..599, even 4xx/5xx)
+// prove the link works and clear the count.
+void httpCheckRecovery(void) {
+  const int s = g_lastHttpStatus;
+  if (s > 0 && s < 600) { g_httpModemErrors = 0; return; }
+  const bool timedOut   = (s == -4);
+  const bool modemError = timedOut || s == -1 || (s >= 700 && s < 800);
+  if (!modemError) return;
+  g_httpModemErrors++;
+  if (!g_modemOk) return;
+  if (!timedOut && g_httpModemErrors < HTTP_MODEM_ERR_LIMIT) return;
+  if (g_httpRecovered && !timeElapsed(millis(), g_lastHttpRecoverMs, HTTP_RECOVER_GAP_MS)) return;
+  modemResetDataSession();
+}
+
 void httpEnd(void) {
   atCommand("AT+HTTPTERM", 3000);
+  httpCheckRecovery();
+  g_lastHttpStatus = 0;   // checked once per session
 }
 
 // Runs AT+HTTPACTION=<method> and parses "+HTTPACTION: <m>,<status>,<len>".
@@ -773,16 +849,19 @@ int httpAction(int method, uint32_t waitMs, uint32_t& bodyLen) {
   if (!waitForLine("+HTTPACTION:", waitMs, line)) {
     g_perf.httpFailures++;
     g_perf.httpMaxMs = max(g_perf.httpMaxMs, (uint32_t)(millis() - requestStarted));
+    g_lastHttpStatus = -4;
     return -4;
   }
   int c1 = line.indexOf(',');
   int c2 = line.indexOf(',', c1 + 1);
   if (c1 < 0 || c2 < 0) {
     g_perf.httpFailures++;
+    g_lastHttpStatus = -5;
     return -5;
   }
   bodyLen = (uint32_t)line.substring(c2 + 1).toInt();
   int status = line.substring(c1 + 1, c2).toInt();
+  g_lastHttpStatus = status;
   g_perf.httpMaxMs = max(g_perf.httpMaxMs, (uint32_t)(millis() - requestStarted));
   if (status < 200 || status >= 300) g_perf.httpFailures++;
   return status;
@@ -1785,7 +1864,7 @@ bool linkNetworkReady(void) { return g_networkReady && g_modemIp != "none"; }
 bool linkMayAttempt(uint32_t now) {
   if (!FEATURE_TELEMETRY_SEND) return false;
   if (g_link.online) {
-    // One unsuccessful POST must not trigger a tight sequence of 30s
+    // One unsuccessful POST must not trigger a tight sequence of 90s
     // modem timeouts. Wait at least RETRY_FAST_MS before retrying.
     return g_link.failStreak == 0 ||
            timeElapsed(now, g_lastHttpFailureMs, RETRY_FAST_MS);
