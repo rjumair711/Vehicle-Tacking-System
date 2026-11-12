@@ -7,7 +7,8 @@ import {
   TileLayer
 } from 'react-leaflet';
 
-import 'leaflet/dist/leaflet.css';
+// Leaflet CSS is loaded once, globally, from
+// app/globals.css (imported by app/layout.tsx).
 
 import TripRouteLayer, {
   type TripRouteDetail
@@ -35,13 +36,15 @@ function isCoordinate(
 function getInitialCenter(
   trip: TripRouteDetail
 ): [number, number] {
+  const linePoint = trip.route_line?.[0];
+
   const roadPoint =
     trip.road_segments?.[0]?.[0];
 
   const gpsPoint =
     trip.gps_segments?.[0]?.[0];
 
-  let coordinate = roadPoint || gpsPoint;
+  let coordinate = linePoint || roadPoint || gpsPoint;
 
   if (!isCoordinate(coordinate)) {
     try {

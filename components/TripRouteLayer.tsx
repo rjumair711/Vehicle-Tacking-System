@@ -14,12 +14,21 @@ import {
 } from 'react-leaflet';
 
 import type {
-  LatLngExpression
+  LatLngExpression,
+  PointExpression,
+  Direction
 } from 'leaflet';
 
 type LonLat = [number, number];
+type LatLng = [number, number];
 
 export interface TripRouteDetail {
+  // Single continuous [lng, lat] line from the API.
+  route_line?: LonLat[] | null;
+  // Inclusive vertex ranges of route_line that are
+  // estimated connectors.
+  inferred_ranges?: [number, number][] | null;
+
   road_segments?: LonLat[][] | null;
   gps_segments?: LonLat[][] | null;
 
@@ -29,11 +38,15 @@ export interface TripRouteDetail {
     | 'gps-only'
     | null;
 
+  road_match_configured?: boolean;
+
   route_geojson?: string | null;
   routeGeojson?: string | null;
 
   gps_points_count?: number;
 }
+
+export const ROUTE_COLOR = '#2563eb';
 
 function valid(
   point: unknown
@@ -48,9 +61,10 @@ function valid(
   );
 }
 
+// The single [lng, lat] -> [lat, lng] conversion.
 const toLeaflet = (
   point: LonLat
-): [number, number] => [
+): LatLng => [
   point[1],
   point[0]
 ];
@@ -90,10 +104,68 @@ function geojsonRawLines(
   return [];
 }
 
+function metres(a: LatLng, b: LatLng): number {
+  const rad = Math.PI / 180;
+  const x =
+    Math.sin(((b[0] - a[0]) * rad) / 2) ** 2 +
+    Math.cos(a[0] * rad) *
+      Math.cos(b[0] * rad) *
+      Math.sin(((b[1] - a[1]) * rad) / 2) ** 2;
+  return 2 * 6371008.8 * Math.asin(Math.sqrt(x));
+}
+
+// Build the continuous line and split it into
+// matched / inferred slices that share endpoints.
+function buildRoute(trip: TripRouteDetail) {
+  let lonLat: LonLat[] = (trip.route_line || []).filter(valid);
+  let ranges = (trip.inferred_ranges || []).filter(
+    r =>
+      Array.isArray(r) &&
+      Number.isInteger(r[0]) &&
+      Number.isInteger(r[1]) &&
+      r[1] > r[0]
+  );
+
+  // Older API responses: join whatever segments exist.
+  if (lonLat.length < 2) {
+    const parts = [
+      ...(trip.road_segments || []),
+      ...(trip.gps_segments || [])
+    ];
+    const lines = parts.length
+      ? parts
+      : geojsonRawLines(trip.route_geojson || trip.routeGeojson);
+
+    lonLat = lines.flatMap(line => (line || []).filter(valid));
+    ranges = [];
+  }
+
+  const line = lonLat.map(toLeaflet);
+
+  const matched: LatLng[][] = [];
+  const inferred: LatLng[][] = [];
+  let cursor = 0;
+
+  for (const [start, end] of [...ranges].sort((a, b) => a[0] - b[0])) {
+    if (start >= line.length) break;
+    if (start > cursor) matched.push(line.slice(cursor, start + 1));
+    inferred.push(line.slice(start, Math.min(end, line.length - 1) + 1));
+    cursor = Math.max(cursor, end);
+  }
+
+  if (cursor < line.length - 1) matched.push(line.slice(cursor));
+
+  return {
+    line,
+    matched: matched.filter(s => s.length >= 2),
+    inferred: inferred.filter(s => s.length >= 2)
+  };
+}
+
 function ZoomToTrip({
   points
 }: {
-  points: [number, number][];
+  points: LatLng[];
 }) {
   const map = useMap();
 
@@ -112,14 +184,50 @@ function ZoomToTrip({
       map.setView(points[0], 16);
     } else {
       map.fitBounds(points, {
-        padding: [36, 36],
-        maxZoom: 16,
+        padding: [40, 40],
+        maxZoom: 17,
         animate: false
       });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, signature]);
 
   return null;
+}
+
+function Endpoint({
+  center,
+  color,
+  label,
+  direction,
+  offset
+}: {
+  center: LatLng;
+  color: string;
+  label: string;
+  direction: Direction;
+  offset: PointExpression;
+}) {
+  return (
+    <CircleMarker
+      center={center}
+      radius={9}
+      pathOptions={{
+        color: 'white',
+        weight: 3,
+        fillColor: color,
+        fillOpacity: 1
+      }}
+    >
+      <Tooltip
+        permanent
+        direction={direction}
+        offset={offset}
+      >
+        {label}
+      </Tooltip>
+    </CircleMarker>
+  );
 }
 
 export default function TripRouteLayer({
@@ -127,176 +235,92 @@ export default function TripRouteLayer({
 }: {
   trip: TripRouteDetail;
 }) {
-  const route = useMemo(() => {
-    const hasProcessed =
-      (trip.road_segments?.length || 0) > 0 ||
-      (trip.gps_segments?.length || 0) > 0;
-
-    const matched = (
-      trip.road_segments || []
-    )
-      .filter(line =>
-        Array.isArray(line) &&
-        line.length >= 2
-      )
-      .map(line =>
-        line.filter(valid).map(toLeaflet)
-      )
-      .filter(line => line.length >= 2);
-
-    const rawSource = hasProcessed
-      ? trip.gps_segments || []
-      : geojsonRawLines(
-          trip.route_geojson ||
-          trip.routeGeojson
-        );
-
-    const raw = rawSource
-      .filter(line =>
-        Array.isArray(line) &&
-        line.length >= 2
-      )
-      .map(line =>
-        line.filter(valid).map(toLeaflet)
-      )
-      .filter(line => line.length >= 2);
-
-    const all = [
-      ...matched,
-      ...raw
-    ].flat();
-
-    const original = geojsonRawLines(
-      trip.route_geojson ||
+  const route = useMemo(
+    () => buildRoute(trip),
+    [
+      trip.route_line,
+      trip.inferred_ranges,
+      trip.road_segments,
+      trip.gps_segments,
+      trip.route_geojson,
       trip.routeGeojson
-    )
-      .flat()
-      .filter(valid);
+    ]
+  );
 
-    const start = original.length
-      ? toLeaflet(original[0])
-      : all[0];
-
-    const finish = original.length
-      ? toLeaflet(
-          original[original.length - 1]
-        )
-      : all[all.length - 1];
-
-    return {
-      matched,
-      raw,
-      all,
-      start,
-      finish
-    };
-  }, [
-    trip.road_segments,
-    trip.gps_segments,
-    trip.route_geojson,
-    trip.routeGeojson
-  ]);
-
-  if (!route.all.length) {
+  if (!route.line.length) {
     return null;
   }
 
+  const start = route.line[0];
+  const finish = route.line[route.line.length - 1];
+
+  // Round trips: put the labels on opposite sides so
+  // START and END don't sit on top of each other.
+  const overlap =
+    route.line.length > 1 && metres(start, finish) < 120;
+
+  const lineStyle = {
+    lineCap: 'round' as const,
+    lineJoin: 'round' as const
+  };
+
   return (
     <>
-      <ZoomToTrip points={route.all} />
+      <ZoomToTrip points={route.line} />
 
-      {route.raw.map((line, index) => (
+      {/* White casing under the whole line. */}
+      <Polyline
+        positions={route.line as LatLngExpression[]}
+        pathOptions={{
+          ...lineStyle,
+          color: '#FFFFFF',
+          weight: 8,
+          opacity: 0.8
+        }}
+      />
+
+      {route.inferred.map((line, index) => (
         <Polyline
-          key={`gps-${index}`}
-          positions={
-            line as LatLngExpression[]
-          }
+          key={`inferred-${index}`}
+          positions={line as LatLngExpression[]}
           pathOptions={{
-            color: '#D97706',
-            weight: 4,
-            opacity: 0.85,
-            dashArray: '7 8',
-            lineJoin: 'round'
+            ...lineStyle,
+            color: ROUTE_COLOR,
+            weight: 5,
+            opacity: 0.6
           }}
         />
       ))}
 
-      {route.matched.map(
-        (line, index) => (
-          <Polyline
-            key={`shadow-${index}`}
-            positions={
-              line as LatLngExpression[]
-            }
-            pathOptions={{
-              color: '#FFFFFF',
-              weight: 10,
-              opacity: 0.94,
-              lineCap: 'round',
-              lineJoin: 'round'
-            }}
-          />
-        )
-      )}
-
-      {route.matched.map(
-        (line, index) => (
-          <Polyline
-            key={`road-${index}`}
-            positions={
-              line as LatLngExpression[]
-            }
-            pathOptions={{
-              color: '#059669',
-              weight: 6,
-              opacity: 1,
-              lineCap: 'round',
-              lineJoin: 'round'
-            }}
-          />
-        )
-      )}
-
-      {route.start && (
-        <CircleMarker
-          center={route.start}
-          radius={9}
+      {route.matched.map((line, index) => (
+        <Polyline
+          key={`route-${index}`}
+          positions={line as LatLngExpression[]}
           pathOptions={{
-            color: 'white',
-            weight: 3,
-            fillColor: '#059669',
-            fillOpacity: 1
+            ...lineStyle,
+            color: ROUTE_COLOR,
+            weight: 5,
+            opacity: 0.9
           }}
-        >
-          <Tooltip
-            permanent
-            direction="top"
-            offset={[0, -8]}
-          >
-            START
-          </Tooltip>
-        </CircleMarker>
-      )}
+        />
+      ))}
 
-      {route.finish && (
-        <CircleMarker
-          center={route.finish}
-          radius={9}
-          pathOptions={{
-            color: 'white',
-            weight: 3,
-            fillColor: '#DC2626',
-            fillOpacity: 1
-          }}
-        >
-          <Tooltip
-            permanent
-            direction="top"
-            offset={[0, -8]}
-          >
-            END
-          </Tooltip>
-        </CircleMarker>
+      <Endpoint
+        center={start}
+        color="#059669"
+        label="START"
+        direction={overlap ? 'left' : 'top'}
+        offset={overlap ? [-10, 0] : [0, -8]}
+      />
+
+      {route.line.length > 1 && (
+        <Endpoint
+          center={finish}
+          color="#DC2626"
+          label="END"
+          direction={overlap ? 'right' : 'top'}
+          offset={overlap ? [10, 0] : [0, -8]}
+        />
       )}
     </>
   );

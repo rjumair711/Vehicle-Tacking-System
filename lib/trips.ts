@@ -4,9 +4,15 @@ import { prisma } from '@/lib/prisma';
 import type { Session } from '@/lib/auth';
 import { ownerFilter } from '@/lib/trackers';
 import {
+  deriveRoadSegments,
   legacyGeometrySamples,
   matchRecordedRoute,
-  type GpsSample
+  ROUTE_MATCH_VERSION,
+  tripPointsHash,
+  type Coordinate,
+  type GpsSample,
+  type IndexRange,
+  type RoadMatchResult
 } from '@/lib/trip-road-match';
 
 export const TRIP_TIME_ZONE =
@@ -540,6 +546,7 @@ async function loadMovementPoints(
     lng: number;
     lat: number;
     time_s: number;
+    speed: number | null;
   };
 
   let rows: PointRow[];
@@ -558,7 +565,9 @@ async function loadMovementPoints(
           ${utcMoment(
             Prisma.sql`lp.recorded_at`
           )}
-        )::double precision AS time_s
+        )::double precision AS time_s,
+
+        lp.speed::double precision AS speed
 
       FROM location_points lp
 
@@ -590,7 +599,9 @@ async function loadMovementPoints(
 
         EXTRACT(
           EPOCH FROM p.recorded_at
-        )::double precision AS time_s
+        )::double precision AS time_s,
+
+        p.speed_kmh AS speed
 
       FROM trip_route_points p
 
@@ -605,8 +616,131 @@ async function loadMovementPoints(
   return rows.map(point => ({
     lng: Number(point.lng),
     lat: Number(point.lat),
-    time: Number(point.time_s) * 1000
+    time: Number(point.time_s) * 1000,
+    speed:
+      point.speed == null
+        ? undefined
+        : Number(point.speed)
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Persisted road matches (prisma/sql/005_trip_matched_route.sql)
+// ---------------------------------------------------------------------------
+
+type PersistedMeta = {
+  v: number;
+  hash: string;
+  status: RoadMatchResult['road_match_status'];
+  inferred_ranges: IndexRange[];
+  gps_segments: Coordinate[][];
+  gps_points_count: number;
+};
+
+let matchedRouteColumn: Promise<boolean> | null = null;
+
+// The column is optional until migration 005 is applied.
+function hasMatchedRouteColumn(): Promise<boolean> {
+  matchedRouteColumn ??= prisma
+    .$queryRaw<{ ok: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'trip_history'
+          AND column_name = 'matched_route_meta'
+      ) AS ok
+    `
+    .then(rows => Boolean(rows[0]?.ok))
+    .catch(() => {
+      matchedRouteColumn = null;
+      return false;
+    });
+
+  return matchedRouteColumn;
+}
+
+async function loadPersistedMatch(
+  tripId: string,
+  hash: string
+): Promise<RoadMatchResult | null> {
+  if (!/^\d+$/.test(tripId)) return null;
+  if (!(await hasMatchedRouteColumn())) return null;
+
+  const rows = await prisma.$queryRaw<{
+    geojson: string | null;
+    meta: PersistedMeta | null;
+  }[]>`
+    SELECT
+      ST_AsGeoJSON(matched_route) AS geojson,
+      matched_route_meta AS meta
+    FROM trip_history
+    WHERE trip_id = ${tripId}::bigint
+  `;
+
+  const { geojson, meta } = rows[0] || {};
+
+  if (
+    !geojson ||
+    !meta ||
+    meta.v !== ROUTE_MATCH_VERSION ||
+    meta.hash !== hash
+  ) {
+    return null;
+  }
+
+  const line = (
+    JSON.parse(geojson) as { coordinates: Coordinate[] }
+  ).coordinates;
+
+  return {
+    route_line: line,
+    inferred_ranges: meta.inferred_ranges,
+    road_segments: deriveRoadSegments(
+      line,
+      meta.inferred_ranges,
+      meta.status
+    ),
+    gps_segments: meta.gps_segments,
+    road_match_status: meta.status,
+    road_match_configured: true,
+    gps_points_count: meta.gps_points_count
+  };
+}
+
+async function persistMatch(
+  tripId: string,
+  hash: string,
+  result: RoadMatchResult
+): Promise<void> {
+  if (!/^\d+$/.test(tripId)) return;
+  if (result.route_line.length < 2) return;
+  if (!(await hasMatchedRouteColumn())) return;
+
+  const meta: PersistedMeta = {
+    v: ROUTE_MATCH_VERSION,
+    hash,
+    status: result.road_match_status,
+    inferred_ranges: result.inferred_ranges,
+    gps_segments: result.gps_segments,
+    gps_points_count: result.gps_points_count
+  };
+
+  const geojson = JSON.stringify({
+    type: 'LineString',
+    coordinates: result.route_line
+  });
+
+  await prisma.$executeRaw`
+    UPDATE trip_history
+    SET
+      matched_route = ST_SetSRID(
+        ST_GeomFromGeoJSON(${geojson}),
+        4326
+      ),
+      matched_route_meta = ${JSON.stringify(meta)}::jsonb,
+      matched_route_at = NOW()
+    WHERE trip_id = ${tripId}::bigint
+  `;
 }
 
 // Retrieve only a trip the user is authorized to view.
@@ -625,22 +759,42 @@ export async function getTrip(
   if (!trip) return null;
 
   const points = await loadMovementPoints(trip);
+  const completed = trip.status === 'completed';
+  const hash = tripPointsHash(points);
 
-  const signature = [
-    trip.tracker_id,
-    trip.trip_date.toISOString(),
-    trip.end_time.toISOString(),
-    points.length
-  ].join(':');
+  if (completed) {
+    const persisted = await loadPersistedMatch(
+      trip.trip_id,
+      hash
+    ).catch(error => {
+      console.error('Load matched route failed:', error);
+      return null;
+    });
 
-  const matchedRoute = await matchRecordedRoute(
+    if (persisted) return { ...trip, ...persisted };
+  }
+
+  const { result, complete } = await matchRecordedRoute(
     points,
-    signature,
-    trip.status === 'active'
+    `trip:${trip.trip_id}`,
+    !completed
   );
+
+  // Completed trips never change, so store a finished
+  // match. Partial results caused by timeouts or rate
+  // limits are only cached in memory.
+  if (
+    completed &&
+    complete &&
+    result.road_match_status !== 'gps-only'
+  ) {
+    await persistMatch(trip.trip_id, hash, result).catch(
+      error => console.error('Persist matched route failed:', error)
+    );
+  }
 
   return {
     ...trip,
-    ...matchedRoute
+    ...result
   };
 }

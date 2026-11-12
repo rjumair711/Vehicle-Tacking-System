@@ -1,25 +1,52 @@
 
 import 'server-only';
 
+import { createHash } from 'node:crypto';
+
 export type Coordinate = [lng: number, lat: number];
+
+// Inclusive vertex index range into route_line.
+export type IndexRange = [start: number, end: number];
 
 export interface GpsSample {
   lng: number;
   lat: number;
   // Unix timestamp in milliseconds
   time?: number;
+  // km/h, when the tracker reported it
+  speed?: number;
 }
 
+export type RoadMatchStatus =
+  | 'matched'
+  | 'partial'
+  | 'gps-only';
+
 export interface RoadMatchResult {
+  // One continuous, ordered polyline [lng, lat].
+  route_line: Coordinate[];
+
+  // Parts of route_line that were NOT observed on a
+  // matched road: routed or straight connectors across
+  // missing GPS data / unmatched chunks.
+  inferred_ranges: IndexRange[];
+
+  // Kept for older clients.
   road_segments: Coordinate[][];
   gps_segments: Coordinate[][];
-  road_match_status: 'matched' | 'partial' | 'gps-only';
+
+  road_match_status: RoadMatchStatus;
+  road_match_configured: boolean;
   gps_points_count: number;
 }
 
-type OsrmResponse = {
+// Bump when the algorithm changes so persisted
+// matches are recomputed.
+export const ROUTE_MATCH_VERSION = 2;
+
+type OsrmMatchResponse = {
   code?: string;
-  tracepoints?: Array<unknown | null>;
+  message?: string;
   matchings?: Array<{
     confidence?: number;
     geometry?: {
@@ -29,45 +56,234 @@ type OsrmResponse = {
   }>;
 };
 
-// Explicit opt-in: avoids sending vehicle coordinates
-// to an external routing service by default.
-const MATCH_BASE = (
-  process.env.OSRM_MATCH_BASE_URL || ''
-).replace(/\/$/, '');
+type OsrmRouteResponse = {
+  code?: string;
+  routes?: Array<{
+    distance?: number;
+    geometry?: {
+      type?: string;
+      coordinates?: number[][];
+    };
+  }>;
+};
 
-const IS_PUBLIC_DEMO = MATCH_BASE.includes(
+// ---------------------------------------------------------------------------
+// Configuration (server-side only)
+// ---------------------------------------------------------------------------
+
+const PUBLIC_DEMO_URL = 'https://router.project-osrm.org';
+
+const DEBUG =
+  process.env.TRIP_MATCH_DEBUG === 'true' ||
+  process.env.TRIP_MATCH_DEBUG === '1';
+
+function debug(...args: unknown[]) {
+  if (DEBUG) console.log('[trip-match]', ...args);
+}
+
+function resolveBaseUrl(): string {
+  // Accept a base URL with or without a trailing
+  // /match/v1/<profile> or /route/v1/<profile>.
+  let base = (process.env.OSRM_MATCH_BASE_URL || '')
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/(match|route)\/v1\/[^/]+$/, '');
+
+  const isProduction =
+    process.env.NODE_ENV === 'production';
+
+  if (
+    isProduction &&
+    base.includes('router.project-osrm.org')
+  ) {
+    console.warn(
+      '[trip-match] The public OSRM demo server is not allowed in production; road matching disabled.'
+    );
+    return '';
+  }
+
+  if (!base && !isProduction) {
+    // DEV ONLY fallback. router.project-osrm.org is
+    // the public OSRM demo: it is rate-limited, has no
+    // uptime guarantee, and must not be used in
+    // production or to send customer location data.
+    // Set OSRM_MATCH_BASE_URL to a self-hosted OSRM
+    // (see README) for real deployments.
+    base = PUBLIC_DEMO_URL;
+  }
+
+  return base;
+}
+
+const BASE_URL = resolveBaseUrl();
+
+const IS_PUBLIC_DEMO = BASE_URL.includes(
   'router.project-osrm.org'
 );
 
-const MAX_REQUESTS = !MATCH_BASE
+// Upper bound on OSRM calls per trip
+// (match chunks + retries + bridges).
+const MAX_REQUESTS = !BASE_URL
   ? 0
   : IS_PUBLIC_DEMO
-    ? 3
-    : 100;
+    ? 150
+    : 300;
 
-const CHUNK_SIZE = 85;
+const CONCURRENCY = IS_PUBLIC_DEMO ? 1 : 4;
+const REQUEST_TIMEOUT_MS = 8000;
+const TOTAL_BUDGET_MS = 25000;
+
+// Must stay under osrm-routed --max-matching-size
+// (default 100). The public demo only accepts 10.
+const CHUNK_SIZE = Math.max(
+  4,
+  Math.min(
+    100,
+    Number(process.env.OSRM_MAX_MATCH_COORDS) ||
+      (IS_PUBLIC_DEMO ? 10 : 85)
+  )
+);
+
+const CHUNK_OVERLAP = CHUNK_SIZE >= 40 ? 4 : 2;
+
+const RADIUS_DEFAULT_M = 50;
+const RADIUS_RETRY_M = 90;
+
+// osrm-routed rejects radiuses above its
+// --max-matching-radius with "TooBig". The public demo
+// allows about 40 m. Self-hosted servers default to no
+// limit; set OSRM_MAX_MATCH_RADIUS if yours has one.
+let radiusCap = Number(process.env.OSRM_MAX_MATCH_RADIUS) ||
+  (IS_PUBLIC_DEMO ? 40 : Infinity);
+
+const FALLBACK_RADIUS_CAP = 40;
+
+const MAX_SPEED_KMH = 220;
+const STATIONARY_SPEED_KMH = 3;
+const STATIONARY_RADIUS_M = 25;
+const THIN_MIN_SPACING_M = 18;
+const THIN_HEADING_DEG = 30;
+
+// Split the trace where GPS data is missing.
+const GAP_SECONDS = 180;
+const GAP_METRES = 1000;
+
+const BRIDGE_MAX_STRAIGHT_M = 2000;
+const BRIDGE_MAX_DETOUR = 3;
+
 const CACHE_MAX = 200;
 
-const cache = new Map<string, {
-  expires: number;
-  data: RoadMatchResult;
-}>();
+export function roadMatchingConfigured(): boolean {
+  return BASE_URL !== '';
+}
 
-function haversine(a: GpsSample, b: GpsSample): number {
-  const R = 6371008.8;
-  const rad = Math.PI / 180;
+// ---------------------------------------------------------------------------
+// Geometry helpers
+// ---------------------------------------------------------------------------
 
-  const dLat = (b.lat - a.lat) * rad;
-  const dLng = (b.lng - a.lng) * rad;
+const RAD = Math.PI / 180;
+
+function distance(
+  a: { lng: number; lat: number } | Coordinate,
+  b: { lng: number; lat: number } | Coordinate
+): number {
+  const [aLng, aLat] = Array.isArray(a)
+    ? a
+    : [a.lng, a.lat];
+  const [bLng, bLat] = Array.isArray(b)
+    ? b
+    : [b.lng, b.lat];
+
+  const dLat = (bLat - aLat) * RAD;
+  const dLng = (bLng - aLng) * RAD;
 
   const x =
     Math.sin(dLat / 2) ** 2 +
-    Math.cos(a.lat * rad) *
-    Math.cos(b.lat * rad) *
-    Math.sin(dLng / 2) ** 2;
+    Math.cos(aLat * RAD) *
+      Math.cos(bLat * RAD) *
+      Math.sin(dLng / 2) ** 2;
 
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(x)));
+  return 2 * 6371008.8 *
+    Math.asin(Math.min(1, Math.sqrt(x)));
 }
+
+function bearing(a: GpsSample, b: GpsSample): number {
+  const y =
+    Math.sin((b.lng - a.lng) * RAD) *
+    Math.cos(b.lat * RAD);
+  const x =
+    Math.cos(a.lat * RAD) * Math.sin(b.lat * RAD) -
+    Math.sin(a.lat * RAD) *
+      Math.cos(b.lat * RAD) *
+      Math.cos((b.lng - a.lng) * RAD);
+
+  return (Math.atan2(y, x) / RAD + 360) % 360;
+}
+
+function angleDiff(a: number, b: number): number {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
+function lineLength(line: Coordinate[]): number {
+  let total = 0;
+  for (let i = 1; i < line.length; i++) {
+    total += distance(line[i - 1], line[i]);
+  }
+  return total;
+}
+
+// Closest point to p on segment a-b (planar
+// approximation, fine at city scale).
+function projectOnSegment(
+  p: Coordinate,
+  a: Coordinate,
+  b: Coordinate
+): { point: Coordinate; t: number } {
+  const k = Math.cos(p[1] * RAD);
+  const ax = a[0] * k;
+  const bx = b[0] * k;
+  const px = p[0] * k;
+  const dx = bx - ax;
+  const dy = b[1] - a[1];
+  const len2 = dx * dx + dy * dy;
+
+  const t = len2 === 0
+    ? 0
+    : Math.max(
+        0,
+        Math.min(
+          1,
+          ((px - ax) * dx + (p[1] - a[1]) * dy) / len2
+        )
+      );
+
+  return {
+    point: [
+      a[0] + (b[0] - a[0]) * t,
+      a[1] + (b[1] - a[1]) * t
+    ],
+    t
+  };
+}
+
+const toCoord = (p: GpsSample): Coordinate =>
+  [p.lng, p.lat];
+
+function cleanCoords(raw: number[][] | undefined): Coordinate[] {
+  return (raw || [])
+    .filter(point =>
+      Array.isArray(point) &&
+      point.length >= 2 &&
+      Number.isFinite(point[0]) &&
+      Number.isFinite(point[1])
+    )
+    .map(point => [point[0], point[1]] as Coordinate);
+}
+
+// ---------------------------------------------------------------------------
+// Step 2: prepare the input trace
+// ---------------------------------------------------------------------------
 
 function valid(p: GpsSample): boolean {
   return (
@@ -79,332 +295,846 @@ function valid(p: GpsSample): boolean {
   );
 }
 
-function prepareSegments(
-  samples: GpsSample[]
-): GpsSample[][] {
-  const cleaned: GpsSample[] = [];
+const seconds = (p: GpsSample) =>
+  p.time == null ? null : Math.floor(p.time / 1000);
 
-  for (const point of samples) {
-    if (!valid(point)) continue;
+// Sort, drop invalid / duplicate / impossible fixes and
+// collapse stationary jitter.
+function cleanTrace(samples: GpsSample[]): GpsSample[] {
+  let points = samples.filter(valid);
 
-    const previous = cleaned[cleaned.length - 1];
+  if (points.every(p => p.time != null)) {
+    points = points
+      .slice()
+      .sort((a, b) => a.time! - b.time!);
+  }
 
-    if (previous && haversine(previous, point) < 5) {
+  const out: GpsSample[] = [];
+  let rejectedInRow = 0;
+
+  for (const p of points) {
+    const prev = out[out.length - 1];
+
+    if (!prev) {
+      out.push(p);
       continue;
     }
 
-    cleaned.push(point);
+    const metres = distance(prev, p);
+    const ps = seconds(prev);
+    const cs = seconds(p);
+    const dt = ps != null && cs != null ? cs - ps : null;
+
+    // Same second (OSRM needs strictly increasing
+    // timestamps) or the same position.
+    if ((dt != null && dt <= 0) || metres < 1) continue;
+
+    if (
+      dt != null &&
+      dt <= GAP_SECONDS &&
+      metres / dt > MAX_SPEED_KMH / 3.6
+    ) {
+      // If several fixes in a row are "impossible",
+      // the previous kept fix was the outlier.
+      rejectedInRow++;
+      if (rejectedInRow >= 3 && out.length > 1) {
+        out.pop();
+        out.push(p);
+        rejectedInRow = 0;
+      }
+      continue;
+    }
+
+    rejectedInRow = 0;
+
+    const slow =
+      (p.speed != null && p.speed < STATIONARY_SPEED_KMH) ||
+      (dt != null && metres / dt < STATIONARY_SPEED_KMH / 3.6);
+
+    if (slow && metres < STATIONARY_RADIUS_M) continue;
+
+    out.push(p);
   }
 
+  return out;
+}
+
+// Split where GPS data is missing.
+function splitAtGaps(points: GpsSample[]): GpsSample[][] {
   const segments: GpsSample[][] = [];
   let current: GpsSample[] = [];
 
-  for (const point of cleaned) {
-    const previous = current[current.length - 1];
+  for (const p of points) {
+    const prev = current[current.length - 1];
 
-    if (previous) {
-      const metres = haversine(previous, point);
+    if (prev) {
+      const ps = seconds(prev);
+      const cs = seconds(p);
+      const dt = ps != null && cs != null ? cs - ps : null;
+      const metres = distance(prev, p);
 
-      const dt =
-        previous.time != null && point.time != null
-          ? (point.time - previous.time) / 1000
-          : undefined;
-
-      const gap =
-        (
-          dt != null &&
-          (
-            dt <= 0 ||
-            dt > 180 ||
-            metres / dt > 220 / 3.6
-          )
-        ) ||
-        (
-          dt == null &&
-          metres > 750
-        );
-
-      if (gap) {
-        if (current.length >= 2) {
-          segments.push(current);
-        }
-
+      if (
+        (dt != null && dt > GAP_SECONDS) ||
+        metres > GAP_METRES
+      ) {
+        segments.push(current);
         current = [];
       }
     }
 
-    current.push(point);
+    current.push(p);
   }
 
-  if (current.length >= 2) {
-    segments.push(current);
-  }
+  if (current.length) segments.push(current);
 
   return segments;
 }
 
-function gpsOnly(
-  segments: GpsSample[][],
-  count: number
-): RoadMatchResult {
-  return {
-    road_segments: [],
-    gps_segments: segments.map(segment =>
-      segment.map(point => [
-        point.lng,
-        point.lat
-      ] as Coordinate)
-    ),
-    road_match_status: 'gps-only',
-    gps_points_count: count
-  };
+// Keep samples >= ~18 m apart, plus the endpoints and
+// sharp turns.
+function thin(segment: GpsSample[]): GpsSample[] {
+  if (segment.length <= 2) return segment;
+
+  const kept: GpsSample[] = [segment[0]];
+
+  for (let i = 1; i < segment.length - 1; i++) {
+    const last = kept[kept.length - 1];
+    const p = segment[i];
+    const next = segment[i + 1];
+    const d = distance(last, p);
+
+    if (d >= THIN_MIN_SPACING_M) {
+      kept.push(p);
+      continue;
+    }
+
+    if (
+      d >= 5 &&
+      distance(p, next) >= 5 &&
+      angleDiff(bearing(last, p), bearing(p, next)) >
+        THIN_HEADING_DEG
+    ) {
+      kept.push(p);
+    }
+  }
+
+  const last = segment[segment.length - 1];
+  const tail = kept[kept.length - 1];
+
+  if (tail !== last) {
+    // Avoid two nearly identical final points.
+    if (kept.length > 1 && distance(tail, last) < 5) {
+      kept[kept.length - 1] = last;
+    } else {
+      kept.push(last);
+    }
+  }
+
+  return kept;
 }
 
-async function matchChunk(
-  points: GpsSample[]
-): Promise<Coordinate[][] | null> {
-  if (points.length < 2) return null;
+function chunk(segment: GpsSample[]): GpsSample[][] {
+  if (segment.length <= CHUNK_SIZE) return [segment];
 
-  const coords = points
-    .map(point =>
-      `${point.lng.toFixed(6)},${point.lat.toFixed(6)}`
+  const chunks: GpsSample[][] = [];
+  const step = CHUNK_SIZE - CHUNK_OVERLAP;
+
+  for (let offset = 0; ; offset += step) {
+    const part = segment.slice(offset, offset + CHUNK_SIZE);
+    chunks.push(part);
+    if (offset + CHUNK_SIZE >= segment.length) break;
+  }
+
+  return chunks;
+}
+
+// ---------------------------------------------------------------------------
+// OSRM calls
+// ---------------------------------------------------------------------------
+
+interface Budget {
+  requests: number;
+  deadline: number;
+}
+
+function canRequest(budget: Budget): boolean {
+  return (
+    budget.requests < MAX_REQUESTS &&
+    Date.now() < budget.deadline
+  );
+}
+
+async function osrmFetch<T>(
+  service: 'match' | 'route',
+  coords: Coordinate[],
+  params: URLSearchParams,
+  budget: Budget,
+  label: string
+): Promise<{ status: number; body: T | null }> {
+  budget.requests++;
+
+  const path = coords
+    .map(([lng, lat]) =>
+      `${lng.toFixed(6)},${lat.toFixed(6)}`
     )
     .join(';');
 
-  const params = new URLSearchParams({
-    geometries: 'geojson',
-    overview: 'full',
-    steps: 'false',
-    gaps: 'split',
-    tidy: 'true'
-  });
-
-  const times = points.map(point =>
-    point.time == null
-      ? null
-      : Math.floor(point.time / 1000)
-  );
-
-  const validTimes = times.every((value, index) =>
-    value !== null &&
-    (
-      index === 0 ||
-      value > (times[index - 1] ?? -Infinity)
-    )
-  );
-
-  if (validTimes) {
-    params.set('timestamps', times.join(';'));
+  // Never log coordinates.
+  const safeParams = new URLSearchParams(params);
+  for (const key of ['timestamps', 'radiuses']) {
+    const value = safeParams.get(key);
+    if (value) {
+      safeParams.set(
+        key,
+        `<${value.split(';').length} values>`
+      );
+    }
   }
 
-  params.set(
-    'radiuses',
-    points.map(() => '35').join(';')
-  );
+  const loggedUrl =
+    `${BASE_URL}/${service}/v1/driving/<${coords.length} coords>?${safeParams}`;
 
   const controller = new AbortController();
-
   const timeout = setTimeout(
     () => controller.abort(),
-    8000
+    REQUEST_TIMEOUT_MS
   );
 
   try {
     const response = await fetch(
-      `${MATCH_BASE}/match/v1/driving/${coords}?${params}`,
+      `${BASE_URL}/${service}/v1/driving/${path}?${params}`,
       {
         signal: controller.signal,
         cache: 'no-store',
-        headers: {
-          Accept: 'application/json'
-        }
+        headers: { Accept: 'application/json' }
       }
     );
 
-    if (!response.ok) return null;
-
-    const body =
-      await response.json() as OsrmResponse;
-
-    if (
-      body.code !== 'Ok' ||
-      !Array.isArray(body.matchings)
-    ) {
-      return null;
+    let body: T | null = null;
+    try {
+      body = (await response.json()) as T;
+    } catch {
+      body = null;
     }
 
-    // Do not pretend that omitted GPS points
-    // were successfully matched.
-    if (
-      body.tracepoints?.some(point => point === null)
-    ) {
-      return null;
-    }
+    debug(label, loggedUrl, 'HTTP', response.status);
 
-    if (
-      body.matchings.some(
-        match =>
-          match.confidence != null &&
-          match.confidence < 0.5
-      )
-    ) {
-      return null;
-    }
-
-    const lines = body.matchings
-      .filter(match =>
-        match.geometry?.type === 'LineString' &&
-        (match.geometry.coordinates?.length || 0) >= 2
-      )
-      .map(match =>
-        match.geometry!.coordinates!
-          .filter(point =>
-            Array.isArray(point) &&
-            point.length >= 2 &&
-            Number.isFinite(point[0]) &&
-            Number.isFinite(point[1])
-          )
-          .map(point => [
-            point[0],
-            point[1]
-          ] as Coordinate)
-      )
-      .filter(line => line.length >= 2);
-
-    return lines.length ? lines : null;
-  } catch {
-    return null;
+    return { status: response.status, body };
+  } catch (error) {
+    debug(
+      label,
+      loggedUrl,
+      'FAILED',
+      (error as Error)?.name || error
+    );
+    return { status: 0, body: null };
   } finally {
     clearTimeout(timeout);
   }
 }
 
+interface ChunkMatch {
+  lines: Coordinate[][];
+  transient: boolean;
+}
+
+async function matchChunkOnce(
+  points: GpsSample[],
+  radius: number,
+  budget: Budget,
+  label: string
+): Promise<ChunkMatch> {
+  const params = new URLSearchParams({
+    geometries: 'geojson',
+    overview: 'full',
+    steps: 'false',
+    tidy: 'true',
+    gaps: 'ignore'
+  });
+
+  // Strictly increasing whole seconds are guaranteed by
+  // cleanTrace(); only send them when every point has one.
+  const times = points.map(seconds);
+  if (times.every(t => t != null)) {
+    params.set('timestamps', times.join(';'));
+  }
+
+  params.set(
+    'radiuses',
+    points.map(() => String(radius)).join(';')
+  );
+
+  const { status, body } = await osrmFetch<OsrmMatchResponse>(
+    'match',
+    points.map(toCoord),
+    params,
+    budget,
+    label
+  );
+
+  const matchings = body?.matchings || [];
+
+  debug(
+    label,
+    `radius=${radius}m`,
+    'code',
+    body?.code ?? '(none)',
+    'matchings',
+    matchings.length,
+    'confidence',
+    matchings
+      .map(m => m.confidence?.toFixed(2) ?? '?')
+      .join(',')
+  );
+
+  if (status === 0 || status === 429 || status >= 500) {
+    return { lines: [], transient: true };
+  }
+
+  if (
+    body?.code === 'TooBig' &&
+    /radius/i.test(body.message || '') &&
+    radius > FALLBACK_RADIUS_CAP
+  ) {
+    // Server has a lower --max-matching-radius.
+    console.warn(
+      `[trip-match] OSRM rejected a ${radius} m radius; capping at ${FALLBACK_RADIUS_CAP} m. Set OSRM_MAX_MATCH_RADIUS to silence this.`
+    );
+    radiusCap = FALLBACK_RADIUS_CAP;
+    return matchChunkOnce(
+      points,
+      FALLBACK_RADIUS_CAP,
+      budget,
+      `${label} capped`
+    );
+  }
+
+  if (
+    body?.code === 'TooBig' &&
+    /coordinates/i.test(body.message || '') &&
+    points.length > 3
+  ) {
+    // Server has a lower --max-matching-size:
+    // split the chunk (sharing one point) and retry.
+    console.warn(
+      `[trip-match] OSRM rejected ${points.length} coordinates; splitting. Set OSRM_MAX_MATCH_COORDS to match the server.`
+    );
+    const mid = Math.floor(points.length / 2);
+    const a = await matchChunkOnce(points.slice(0, mid + 1), radius, budget, `${label} a`);
+    const b = await matchChunkOnce(points.slice(mid), radius, budget, `${label} b`);
+    return {
+      lines: [...a.lines, ...b.lines],
+      transient: a.transient || b.transient
+    };
+  }
+
+  if (body?.code !== 'Ok') {
+    return { lines: [], transient: false };
+  }
+
+  // Draw matchings[].geometry, never tracepoints.
+  const lines = matchings
+    .filter(m => m.geometry?.type === 'LineString')
+    .map(m => cleanCoords(m.geometry?.coordinates))
+    .filter(line => line.length >= 2);
+
+  return { lines, transient: false };
+}
+
+async function matchChunk(
+  points: GpsSample[],
+  budget: Budget,
+  label: string
+): Promise<ChunkMatch> {
+  if (points.length < 2 || !canRequest(budget)) {
+    return { lines: [], transient: true };
+  }
+
+  const radius = Math.min(RADIUS_DEFAULT_M, radiusCap);
+
+  const first = await matchChunkOnce(
+    points,
+    radius,
+    budget,
+    label
+  );
+
+  if (first.lines.length || first.transient) return first;
+
+  const wider = Math.min(RADIUS_RETRY_M, radiusCap);
+  if (wider <= radius) return first;
+  if (!canRequest(budget)) return { lines: [], transient: true };
+
+  // NoMatch etc.: retry once with a wider radius.
+  return matchChunkOnce(
+    points,
+    wider,
+    budget,
+    `${label} retry`
+  );
+}
+
+async function routeBetween(
+  a: Coordinate,
+  b: Coordinate,
+  budget: Budget,
+  label: string
+): Promise<Coordinate[] | null> {
+  if (!canRequest(budget)) return null;
+
+  const { body } = await osrmFetch<OsrmRouteResponse>(
+    'route',
+    [a, b],
+    new URLSearchParams({
+      overview: 'full',
+      geometries: 'geojson',
+      steps: 'false'
+    }),
+    budget,
+    label
+  );
+
+  debug(label, 'route code', body?.code ?? '(none)');
+
+  if (body?.code !== 'Ok') return null;
+
+  const line = cleanCoords(
+    body.routes?.[0]?.geometry?.coordinates
+  );
+
+  return line.length >= 2 ? line : null;
+}
+
+// ---------------------------------------------------------------------------
+// Step 4: bridge pieces into one continuous line
+// ---------------------------------------------------------------------------
+
+interface Piece {
+  kind: 'matched' | 'raw';
+  coords: Coordinate[];
+  // True when this piece continues the previous one
+  // inside the same GPS segment (chunk overlap).
+  continues: boolean;
+}
+
+async function bridge(
+  a: Coordinate,
+  b: Coordinate,
+  raw: Coordinate[] | null,
+  budget: Budget,
+  label: string
+): Promise<Coordinate[]> {
+  const straight = distance(a, b);
+
+  if (straight < 15) return [a, b];
+
+  const rawLength = raw && raw.length >= 2
+    ? lineLength([a, ...raw, b])
+    : null;
+
+  if (straight <= BRIDGE_MAX_STRAIGHT_M) {
+    const route = await routeBetween(a, b, budget, label);
+
+    if (route) {
+      const length = lineLength(route);
+      const sane =
+        length <= BRIDGE_MAX_DETOUR * straight &&
+        // Across an unmatched GPS chunk the route must
+        // roughly agree with what was actually driven.
+        (rawLength == null ||
+          (length >= 0.6 * rawLength &&
+            length <= 1.6 * rawLength));
+
+      debug(
+        label,
+        `straight=${Math.round(straight)}m route=${Math.round(length)}m`,
+        rawLength != null ? `raw=${Math.round(rawLength)}m` : '',
+        sane ? 'used' : 'rejected'
+      );
+
+      if (sane) return [a, ...route, b];
+    }
+  }
+
+  if (raw && raw.length) return [a, ...raw, b];
+
+  return [a, b];
+}
+
+// Find the closest point on line[from..] to p.
+function nearestOnTail(
+  line: Coordinate[],
+  from: number,
+  p: Coordinate
+): { index: number; point: Coordinate; metres: number } | null {
+  let best: { index: number; point: Coordinate; metres: number } | null = null;
+
+  for (let i = Math.max(from, 0); i < line.length - 1; i++) {
+    const { point } = projectOnSegment(p, line[i], line[i + 1]);
+    const metres = distance(point, p);
+
+    if (!best || metres < best.metres) {
+      best = { index: i, point, metres };
+    }
+  }
+
+  return best;
+}
+
+async function assemble(
+  pieces: Piece[],
+  budget: Budget
+): Promise<{
+  line: Coordinate[];
+  inferred: IndexRange[];
+}> {
+  const line: Coordinate[] = [];
+  const inferred: IndexRange[] = [];
+
+  let pieceStart = 0;
+  let pendingRaw: Coordinate[] = [];
+  let bridgeNo = 0;
+
+  const appendFrom = (coords: Coordinate[]) => {
+    for (const c of coords) {
+      const last = line[line.length - 1];
+      if (!last || distance(last, c) > 0.5) line.push(c);
+    }
+  };
+
+  const appendInferred = (connector: Coordinate[]) => {
+    const start = Math.max(line.length - 1, 0);
+    appendFrom(connector);
+    const end = line.length - 1;
+    if (end > start) inferred.push([start, end]);
+  };
+
+  for (const piece of pieces) {
+    if (piece.kind === 'raw') {
+      pendingRaw.push(...piece.coords);
+      continue;
+    }
+
+    const coords = piece.coords;
+
+    if (!line.length && pendingRaw.length) {
+      // Trip starts with unmatched GPS: draw it as
+      // inferred, then bridge to the first match below.
+      appendFrom(pendingRaw);
+      if (line.length > 1) inferred.push([0, line.length - 1]);
+      pendingRaw = [];
+    }
+
+    if (!line.length) {
+      pieceStart = 0;
+      appendFrom(coords);
+      continue;
+    }
+
+    const start = coords[0];
+
+    // Consecutive chunks of the same segment overlap by a
+    // few points: the next chunk starts on top of the
+    // previous geometry. Cut the previous line there so
+    // the overlap is not drawn twice.
+    if (piece.continues && !pendingRaw.length) {
+      const near = nearestOnTail(line, pieceStart, start);
+
+      if (near && near.metres < 30) {
+        line.length = near.index + 1;
+        appendFrom([near.point]);
+        pieceStart = line.length - 1;
+        appendFrom(coords);
+        continue;
+      }
+    }
+
+    const end = line[line.length - 1];
+
+    if (distance(end, start) < 10 && !pendingRaw.length) {
+      pieceStart = line.length - 1;
+      appendFrom(coords);
+      continue;
+    }
+
+    const connector = await bridge(
+      end,
+      start,
+      pendingRaw.length ? pendingRaw : null,
+      budget,
+      `bridge ${++bridgeNo}`
+    );
+
+    pendingRaw = [];
+    appendInferred(connector);
+    pieceStart = line.length - 1;
+    appendFrom(coords);
+  }
+
+  if (pendingRaw.length) {
+    // Trip ends with unmatched GPS.
+    if (line.length) {
+      appendInferred([line[line.length - 1], ...pendingRaw]);
+    } else {
+      appendFrom(pendingRaw);
+      if (line.length > 1) inferred.push([0, line.length - 1]);
+    }
+  }
+
+  return { line, inferred };
+}
+
+function sliceRanges(
+  line: Coordinate[],
+  inferred: IndexRange[]
+): Coordinate[][] {
+  const matched: Coordinate[][] = [];
+  let cursor = 0;
+
+  for (const [start, end] of inferred) {
+    if (start > cursor) matched.push(line.slice(cursor, start + 1));
+    cursor = end;
+  }
+
+  if (cursor < line.length - 1) {
+    matched.push(line.slice(cursor));
+  }
+
+  return matched.filter(part => part.length >= 2);
+}
+
+// Rebuild the compatibility fields from a persisted line.
+export function deriveRoadSegments(
+  line: Coordinate[],
+  inferred: IndexRange[],
+  status: RoadMatchStatus
+): Coordinate[][] {
+  return status === 'gps-only'
+    ? []
+    : sliceRanges(line, inferred);
+}
+
+// GPS-only: the cleaned trace as one line; jumps across
+// missing data are marked as inferred.
+function gpsOnly(
+  segments: GpsSample[][],
+  count: number
+): RoadMatchResult {
+  const line: Coordinate[] = [];
+  const inferred: IndexRange[] = [];
+
+  for (const segment of segments) {
+    if (line.length) inferred.push([line.length - 1, line.length]);
+    line.push(...segment.map(toCoord));
+  }
+
+  return {
+    route_line: line,
+    inferred_ranges: inferred,
+    road_segments: [],
+    gps_segments: segments
+      .filter(s => s.length >= 2)
+      .map(s => s.map(toCoord)),
+    road_match_status: 'gps-only',
+    road_match_configured: roadMatchingConfigured(),
+    gps_points_count: count
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+export function tripPointsHash(samples: GpsSample[]): string {
+  const hash = createHash('sha1');
+  for (const p of samples) {
+    hash.update(
+      `${p.lng.toFixed(6)},${p.lat.toFixed(6)},${p.time ?? ''};`
+    );
+  }
+  return hash.digest('hex').slice(0, 20);
+}
+
+export interface MatchOutcome {
+  result: RoadMatchResult;
+  // False when a timeout / rate limit / request budget
+  // cut matching short. Such results must not be
+  // persisted permanently.
+  complete: boolean;
+}
+
+const cache = new Map<string, {
+  expires: number;
+  data: MatchOutcome;
+}>();
+
 export async function matchRecordedRoute(
   samples: GpsSample[],
   cacheKey: string,
   isLive = false
-): Promise<RoadMatchResult> {
-  const parts = prepareSegments(samples);
-  const fallback = gpsOnly(parts, samples.length);
+): Promise<MatchOutcome> {
+  const cleaned = cleanTrace(samples);
+  const segments = splitAtGaps(cleaned);
 
-  if (!parts.length) return fallback;
+  if (!cleaned.length || !BASE_URL) {
+    return {
+      result: gpsOnly(segments, samples.length),
+      complete: true
+    };
+  }
 
-  const cached = cache.get(cacheKey);
+  const key = `${cacheKey}:${tripPointsHash(samples)}`;
+  const cached = cache.get(key);
 
-  if (
-    cached &&
-    cached.expires > Date.now()
-  ) {
+  if (cached && cached.expires > Date.now()) {
     return cached.data;
   }
 
-  const chunks: GpsSample[][] = [];
+  const thinned = segments.map(thin);
 
-  for (const part of parts) {
-    for (
-      let offset = 0;
-      offset < part.length - 1;
-      offset += CHUNK_SIZE - 1
-    ) {
-      const chunk = part.slice(
-        offset,
-        offset + CHUNK_SIZE
-      );
+  const chunks: Array<{
+    points: GpsSample[];
+    continues: boolean;
+  }> = [];
 
-      if (chunk.length >= 2) {
-        chunks.push(chunk);
-      }
+  for (const segment of thinned) {
+    if (segment.length < 2) {
+      // Single fix between gaps: keep as raw so it can
+      // still be bridged through.
+      chunks.push({ points: segment, continues: false });
+      continue;
     }
+
+    chunk(segment).forEach((points, index) => {
+      chunks.push({ points, continues: index > 0 });
+    });
   }
 
-  const results:
-    Array<Coordinate[][] | null> =
-      Array(chunks.length).fill(null);
-
-  const deadline = Date.now() + 12000;
-
-  let next = 0;
-
-  const workerCount = Math.min(
-    4,
-    MAX_REQUESTS,
-    chunks.length
+  debug(
+    `samples=${samples.length} cleaned=${cleaned.length}`,
+    `segments=${segments.length}`,
+    `thinned=${thinned.reduce((n, s) => n + s.length, 0)}`,
+    `chunks=${chunks.length}`,
+    `base=${BASE_URL}`
   );
+
+  const budget: Budget = {
+    requests: 0,
+    deadline: Date.now() + TOTAL_BUDGET_MS
+  };
+
+  const results: ChunkMatch[] = Array(chunks.length);
+  let next = 0;
 
   await Promise.all(
     Array.from(
-      { length: workerCount },
+      { length: Math.min(CONCURRENCY, chunks.length) },
       async () => {
-        while (true) {
+        while (next < chunks.length) {
           const index = next++;
+          const { points } = chunks[index];
 
-          if (
-            index >= chunks.length ||
-            index >= MAX_REQUESTS ||
-            Date.now() > deadline
-          ) {
-            return;
-          }
-
-          results[index] =
-            await matchChunk(chunks[index]);
+          results[index] = points.length >= 2
+            ? await matchChunk(
+                points,
+                budget,
+                `chunk ${index + 1}/${chunks.length} (${points.length} pts)`
+              )
+            : { lines: [], transient: false };
         }
       }
     )
   );
 
-  let matched = 0;
-  let unmatched = 0;
+  let matchedChunks = 0;
+  let transient = false;
 
-  const roadSegments: Coordinate[][] = [];
+  const pieces: Piece[] = [];
   const gpsSegments: Coordinate[][] = [];
 
-  chunks.forEach((chunk, index) => {
-    const lines = results[index];
+  chunks.forEach(({ points, continues }, index) => {
+    const { lines, transient: t } = results[index];
+    transient ||= t;
 
-    if (lines) {
-      matched++;
-      roadSegments.push(...lines);
+    if (lines.length) {
+      matchedChunks++;
+      lines.forEach((coords, i) => {
+        pieces.push({
+          kind: 'matched',
+          coords,
+          continues: continues || i > 0
+        });
+      });
     } else {
-      unmatched++;
+      // Skip the overlap points already covered by the
+      // previous chunk.
+      const raw = (continues
+        ? points.slice(CHUNK_OVERLAP)
+        : points
+      ).map(toCoord);
 
-      gpsSegments.push(
-        chunk.map(point => [
-          point.lng,
-          point.lat
-        ] as Coordinate)
-      );
+      if (points.length >= 2) gpsSegments.push(points.map(toCoord));
+      if (raw.length) {
+        pieces.push({ kind: 'raw', coords: raw, continues });
+      }
     }
   });
 
+  if (!matchedChunks) {
+    const outcome: MatchOutcome = {
+      result: gpsOnly(segments, samples.length),
+      complete: !transient
+    };
+    cache.set(key, {
+      expires: Date.now() + (transient ? 60_000 : 30 * 60_000),
+      data: outcome
+    });
+    return outcome;
+  }
+
+  const { line, inferred } = await assemble(pieces, budget);
+
+  const matchableChunks = chunks.filter(c => c.points.length >= 2).length;
+
   const result: RoadMatchResult = {
-    road_segments: roadSegments,
+    route_line: line,
+    inferred_ranges: inferred,
+    road_segments: sliceRanges(line, inferred),
     gps_segments: gpsSegments,
     road_match_status:
-      matched === 0
-        ? 'gps-only'
-        : unmatched === 0
-          ? 'matched'
-          : 'partial',
+      matchedChunks === matchableChunks ? 'matched' : 'partial',
+    road_match_configured: true,
     gps_points_count: samples.length
   };
 
-  cache.set(cacheKey, {
+  // Bridges that hit the budget fall back to straight
+  // lines, so treat an exhausted budget as incomplete.
+  const complete = !transient && canRequest(budget);
+
+  debug(
+    `status=${result.road_match_status}`,
+    `matchedChunks=${matchedChunks}/${matchableChunks}`,
+    `line=${line.length} pts`,
+    `inferred=${JSON.stringify(inferred)}`,
+    `requests=${budget.requests}`,
+    `complete=${complete}`
+  );
+
+  const outcome: MatchOutcome = { result, complete };
+
+  cache.set(key, {
     expires:
       Date.now() +
-      (isLive ? 30000 : 30 * 60 * 1000),
-    data: result
+      (isLive ? 30_000 : complete ? 6 * 3600_000 : 60_000),
+    data: outcome
   });
 
   if (cache.size > CACHE_MAX) {
     const firstKey = cache.keys().next().value;
-
-    if (firstKey !== undefined) {
-      cache.delete(firstKey);
-    }
+    if (firstKey !== undefined) cache.delete(firstKey);
   }
 
-  return result;
+  return outcome;
 }
 
 export function legacyGeometrySamples(
