@@ -3,6 +3,12 @@ import 'server-only';
 
 import { createHash } from 'node:crypto';
 
+import {
+  OSRM_BASE_URL,
+  OSRM_IS_PUBLIC,
+  osrmGet
+} from '@/lib/osrm';
+
 export type Coordinate = [lng: number, lat: number];
 
 // Inclusive vertex index range into route_line.
@@ -71,8 +77,6 @@ type OsrmRouteResponse = {
 // Configuration (server-side only)
 // ---------------------------------------------------------------------------
 
-const PUBLIC_DEMO_URL = 'https://router.project-osrm.org';
-
 const DEBUG =
   process.env.TRIP_MATCH_DEBUG === 'true' ||
   process.env.TRIP_MATCH_DEBUG === '1';
@@ -81,57 +85,34 @@ function debug(...args: unknown[]) {
   if (DEBUG) console.log('[trip-match]', ...args);
 }
 
-function resolveBaseUrl(): string {
-  // Accept a base URL with or without a trailing
-  // /match/v1/<profile> or /route/v1/<profile>.
-  let base = (process.env.OSRM_MATCH_BASE_URL || '')
-    .trim()
-    .replace(/\/+$/, '')
-    .replace(/\/(match|route)\/v1\/[^/]+$/, '');
-
-  const isProduction =
-    process.env.NODE_ENV === 'production';
-
-  if (
-    isProduction &&
-    base.includes('router.project-osrm.org')
-  ) {
-    console.warn(
-      '[trip-match] The public OSRM demo server is not allowed in production; road matching disabled.'
-    );
-    return '';
-  }
-
-  if (!base && !isProduction) {
-    // DEV ONLY fallback. router.project-osrm.org is
-    // the public OSRM demo: it is rate-limited, has no
-    // uptime guarantee, and must not be used in
-    // production or to send customer location data.
-    // Set OSRM_MATCH_BASE_URL to a self-hosted OSRM
-    // (see README) for real deployments.
-    base = PUBLIC_DEMO_URL;
-  }
-
-  return base;
-}
-
-const BASE_URL = resolveBaseUrl();
-
-const IS_PUBLIC_DEMO = BASE_URL.includes(
-  'router.project-osrm.org'
-);
+// Rules for which server is used (OSRM_MATCH_BASE_URL,
+// ALLOW_PUBLIC_OSRM) live in lib/osrm.ts.
+const BASE_URL = OSRM_BASE_URL;
+const IS_PUBLIC_DEMO = OSRM_IS_PUBLIC;
 
 // Upper bound on OSRM calls per trip
 // (match chunks + retries + bridges).
 const MAX_REQUESTS = !BASE_URL
   ? 0
   : IS_PUBLIC_DEMO
-    ? 150
+    ? 60
     : 300;
 
+// The public server is throttled to 1 request/s in
+// lib/osrm.ts, so parallel workers gain nothing there.
 const CONCURRENCY = IS_PUBLIC_DEMO ? 1 : 4;
 const REQUEST_TIMEOUT_MS = 8000;
-const TOTAL_BUDGET_MS = 25000;
+
+// app/api/trips sets maxDuration = 60; leave ~10 s for
+// the database and the response.
+const TOTAL_BUDGET_MS = 50_000;
+
+// Stop calling a server that keeps rate-limiting or
+// failing (each failure already had one retry).
+const MAX_TRANSIENT_FAILURES = 2;
+
+// In-memory cache of today's active trip.
+const LIVE_CACHE_MS = 5 * 60_000;
 
 // Must stay under osrm-routed --max-matching-size
 // (default 100). The public demo only accepts 10.
@@ -161,7 +142,10 @@ const FALLBACK_RADIUS_CAP = 40;
 const MAX_SPEED_KMH = 220;
 const STATIONARY_SPEED_KMH = 3;
 const STATIONARY_RADIUS_M = 25;
-const THIN_MIN_SPACING_M = 18;
+// The public server takes only 10 points per request at
+// 1 request/s, so sample more sparsely there to keep a
+// whole day's trip inside the time budget.
+const THIN_MIN_SPACING_M = IS_PUBLIC_DEMO ? 30 : 18;
 const THIN_HEADING_DEG = 30;
 
 // Split the trace where GPS data is missing.
@@ -455,14 +439,27 @@ function chunk(segment: GpsSample[]): GpsSample[][] {
 interface Budget {
   requests: number;
   deadline: number;
+  transientFailures: number;
+  // Set when a call was skipped for lack of time,
+  // requests or a failing server.
+  exhausted: boolean;
 }
 
 function canRequest(budget: Budget): boolean {
-  return (
+  const ok =
     budget.requests < MAX_REQUESTS &&
-    Date.now() < budget.deadline
-  );
+    budget.transientFailures < MAX_TRANSIENT_FAILURES &&
+    Date.now() < budget.deadline;
+
+  if (!ok) budget.exhausted = true;
+  return ok;
 }
+
+// Results of individual OSRM calls, reused across views,
+// so a trip that ran out of time resumes instead of
+// starting over (on the same server instance).
+const callCache = new Map<string, unknown>();
+const CALL_CACHE_MAX = 5000;
 
 async function osrmFetch<T>(
   service: 'match' | 'route',
@@ -471,7 +468,6 @@ async function osrmFetch<T>(
   budget: Budget,
   label: string
 ): Promise<{ status: number; body: T | null }> {
-  budget.requests++;
 
   const path = coords
     .map(([lng, lat]) =>
@@ -494,43 +490,40 @@ async function osrmFetch<T>(
   const loggedUrl =
     `${BASE_URL}/${service}/v1/driving/<${coords.length} coords>?${safeParams}`;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    REQUEST_TIMEOUT_MS
-  );
+  const url = `${service}/v1/driving/${path}?${params}`;
+  const key = createHash('sha1').update(url).digest('base64');
 
-  try {
-    const response = await fetch(
-      `${BASE_URL}/${service}/v1/driving/${path}?${params}`,
-      {
-        signal: controller.signal,
-        cache: 'no-store',
-        headers: { Accept: 'application/json' }
-      }
-    );
-
-    let body: T | null = null;
-    try {
-      body = (await response.json()) as T;
-    } catch {
-      body = null;
-    }
-
-    debug(label, loggedUrl, 'HTTP', response.status);
-
-    return { status: response.status, body };
-  } catch (error) {
-    debug(
-      label,
-      loggedUrl,
-      'FAILED',
-      (error as Error)?.name || error
-    );
-    return { status: 0, body: null };
-  } finally {
-    clearTimeout(timeout);
+  if (callCache.has(key)) {
+    debug(label, loggedUrl, 'cached');
+    return { status: 200, body: callCache.get(key) as T };
   }
+
+  budget.requests++;
+
+  // Throttled, User-Agent, one retry on 429/5xx.
+  const { status, body, transient } = await osrmGet<T>(url, {
+    deadline: budget.deadline,
+    timeoutMs: REQUEST_TIMEOUT_MS
+  });
+
+  debug(label, loggedUrl, 'HTTP', status || 'failed/timeout');
+
+  if (transient) {
+    budget.transientFailures++;
+    budget.exhausted = true;
+    return { status: 0, body: null };
+  }
+
+  // Cache definite answers (Ok, NoMatch, ...), not outages.
+  if (status > 0 && body) {
+    callCache.set(key, body);
+    if (callCache.size > CALL_CACHE_MAX) {
+      const oldest = callCache.keys().next().value;
+      if (oldest !== undefined) callCache.delete(oldest);
+    }
+  }
+
+  return { status, body };
 }
 
 interface ChunkMatch {
@@ -968,26 +961,75 @@ const cache = new Map<string, {
   data: MatchOutcome;
 }>();
 
+const inFlight = new Map<string, Promise<MatchOutcome>>();
+
+/**
+ * Road-match a trip. Completed trips: cached in memory
+ * (and persisted by the caller) only when complete;
+ * incomplete results are not cached, so the next view
+ * resumes using the per-call cache. Today's active trip:
+ * cached for 5 minutes regardless of new points, to keep
+ * the request rate to the OSRM server low.
+ */
 export async function matchRecordedRoute(
   samples: GpsSample[],
   cacheKey: string,
   isLive = false
 ): Promise<MatchOutcome> {
-  const cleaned = cleanTrace(samples);
-  const segments = splitAtGaps(cleaned);
-
-  if (!cleaned.length || !BASE_URL) {
+  if (!BASE_URL) {
     return {
-      result: gpsOnly(segments, samples.length),
+      result: gpsOnly(splitAtGaps(cleanTrace(samples)), samples.length),
       complete: true
     };
   }
 
-  const key = `${cacheKey}:${tripPointsHash(samples)}`;
-  const cached = cache.get(key);
+  const key = isLive
+    ? `${cacheKey}:live`
+    : `${cacheKey}:${tripPointsHash(samples)}`;
 
+  const cached = cache.get(key);
   if (cached && cached.expires > Date.now()) {
     return cached.data;
+  }
+
+  const running = inFlight.get(key);
+  if (running) return running;
+
+  const job = computeMatch(samples)
+    .then(outcome => {
+      const ttl = isLive
+        ? LIVE_CACHE_MS
+        : outcome.complete
+          ? 6 * 3600_000
+          : 0;
+
+      if (ttl > 0) {
+        cache.set(key, { expires: Date.now() + ttl, data: outcome });
+        if (cache.size > CACHE_MAX) {
+          const firstKey = cache.keys().next().value;
+          if (firstKey !== undefined) cache.delete(firstKey);
+        }
+      }
+
+      return outcome;
+    })
+    .finally(() => inFlight.delete(key));
+
+  inFlight.set(key, job);
+  return job;
+}
+
+async function computeMatch(
+  samples: GpsSample[]
+): Promise<MatchOutcome> {
+  const cleaned = cleanTrace(samples);
+  const segments = splitAtGaps(cleaned);
+
+  if (!cleaned.length) {
+    return {
+      result: gpsOnly(segments, samples.length),
+      complete: true
+    };
   }
 
   const thinned = segments.map(thin);
@@ -1020,7 +1062,9 @@ export async function matchRecordedRoute(
 
   const budget: Budget = {
     requests: 0,
-    deadline: Date.now() + TOTAL_BUDGET_MS
+    deadline: Date.now() + TOTAL_BUDGET_MS,
+    transientFailures: 0,
+    exhausted: false
   };
 
   const results: ChunkMatch[] = Array(chunks.length);
@@ -1081,15 +1125,10 @@ export async function matchRecordedRoute(
   });
 
   if (!matchedChunks) {
-    const outcome: MatchOutcome = {
+    return {
       result: gpsOnly(segments, samples.length),
-      complete: !transient
+      complete: !transient && !budget.exhausted
     };
-    cache.set(key, {
-      expires: Date.now() + (transient ? 60_000 : 30 * 60_000),
-      data: outcome
-    });
-    return outcome;
   }
 
   const { line, inferred } = await assemble(pieces, budget);
@@ -1107,9 +1146,11 @@ export async function matchRecordedRoute(
     gps_points_count: samples.length
   };
 
-  // Bridges that hit the budget fall back to straight
-  // lines, so treat an exhausted budget as incomplete.
-  const complete = !transient && canRequest(budget);
+  // Out of time, out of requests, or the server was
+  // failing: return what we have, but it is not final.
+  const complete = !transient && !budget.exhausted;
+
+  if (!complete) result.road_match_status = 'partial';
 
   debug(
     `status=${result.road_match_status}`,
@@ -1120,21 +1161,7 @@ export async function matchRecordedRoute(
     `complete=${complete}`
   );
 
-  const outcome: MatchOutcome = { result, complete };
-
-  cache.set(key, {
-    expires:
-      Date.now() +
-      (isLive ? 30_000 : complete ? 6 * 3600_000 : 60_000),
-    data: outcome
-  });
-
-  if (cache.size > CACHE_MAX) {
-    const firstKey = cache.keys().next().value;
-    if (firstKey !== undefined) cache.delete(firstKey);
-  }
-
-  return outcome;
+  return { result, complete };
 }
 
 export function legacyGeometrySamples(

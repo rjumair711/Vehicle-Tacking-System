@@ -92,6 +92,7 @@ BACKEND_URL      https://<your-service>.onrender.com   (for live updates)
 TRIP_TIME_ZONE             Asia/Karachi (default)
 NEXT_PUBLIC_TRIP_TIME_ZONE Asia/Karachi (Trips page date labels)
 OSRM_MATCH_BASE_URL        base URL of your OSRM server, e.g. https://osrm.example.com (no /match/v1/driving)
+ALLOW_PUBLIC_OSRM          true = use the free public OSRM demo server, also in production (see below)
 OSRM_MAX_MATCH_COORDS      optional; points per /match request, must be <= osrm-routed --max-matching-size (default 85)
 OSRM_MAX_MATCH_RADIUS      optional; metres, only if osrm-routed runs with --max-matching-radius
 TRIP_MATCH_DEBUG           optional; "1" logs per-chunk OSRM status/code/confidence (never coordinates)
@@ -99,7 +100,15 @@ TRIP_ROLLUP_ON_READ        true (default); set false only with verified schedule
 CRON_SECRET                optional, only if cron route is installed and scheduled
 ```
 
-**Road-matching privacy:** in production, trips are road-matched only when `OSRM_MATCH_BASE_URL` points at a server you control. Without it, the trip map shows the recorded GPS trace in blue with a "road matching isn't configured" notice. In development (`NODE_ENV !== 'production'`) the app falls back to the public demo `router.project-osrm.org`. That server is rate-limited, accepts only 10 points per match request and about a 40 m radius, and is not for production or customer location data. The public demo is refused in production even if configured. A trailing `/match/v1/driving` on the base URL is stripped.
+**Road matching and privacy:** the matcher uses `OSRM_MATCH_BASE_URL` when it points at your own server. Otherwise, it uses the public demo `router.project-osrm.org` **only** when `ALLOW_PUBLIC_OSRM=true`, or automatically in development. With neither set, production shows the recorded GPS trace in blue with a "road matching isn't configured" notice. `/api/road-route` follows the same rule and requires login.
+
+`ALLOW_PUBLIC_OSRM=true` is free, but the demo server:
+- is rate-limited (the app throttles to 1 request/s per server instance, sends an identifying User-Agent, and retries once after 2 s on 429/5xx),
+- has no uptime guarantee,
+- accepts only 10 points per match request and about a 40 m radius,
+- **receives your trip coordinates** (a third-party, volunteer-run service).
+
+Completed trips are matched once and stored in `trip_history.matched_route` / `matched_route_meta` (migration 005), and later views make no OSRM calls. The first view of a long trip can take up to ~50 s (`maxDuration = 60` on `/api/trips`). If time runs out, the map shows a `partial` result that isn't stored, and the next view continues from where it stopped. Today's active trip is cached in memory for 5 minutes and never stored. A trailing `/match/v1/driving` on the base URL is stripped.
 
 #### Self-hosting OSRM for Pakistan (car profile, MLD)
 

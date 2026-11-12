@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+import { getSession, unauthorized } from "@/lib/auth";
+import { OSRM_BASE_URL, osrmGet } from "@/lib/osrm";
+
+export const runtime = "nodejs";
 
 type RoutePoint = {
   lat: number;
@@ -29,6 +33,11 @@ function samplePoints(points: RoutePoint[], maxPoints = 25) {
 }
 
 export async function POST(request: Request) {
+  // Logged-in users only: this endpoint forwards
+  // coordinates to an OSRM server.
+  const session = await getSession();
+  if (!session) return unauthorized();
+
   try {
     const body = await request.json();
     const points: RoutePoint[] = body.points;
@@ -55,19 +64,34 @@ export async function POST(request: Request) {
       );
     }
 
+    // Same rule as trip matching: OSRM_MATCH_BASE_URL, or
+    // the public demo only with ALLOW_PUBLIC_OSRM=true.
+    if (!OSRM_BASE_URL) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Road routing is not configured",
+          fallbackPoints: cleanPoints,
+        },
+        { status: 503 }
+      );
+    }
+
     const sampledPoints = samplePoints(cleanPoints);
 
     const coordinates = sampledPoints
       .map((point) => `${point.lng},${point.lat}`)
       .join(";");
 
-    const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=full&geometries=geojson`;
+    // Throttled, with User-Agent and one retry (lib/osrm.ts).
+    const { status, body: data } = await osrmGet<{
+      routes?: Array<{ geometry?: { coordinates?: unknown } }>;
+    }>(
+      `route/v1/driving/${coordinates}?overview=full&geometries=geojson`,
+      { deadline: Date.now() + 15000 }
+    );
 
-    const response = await fetch(osrmUrl, {
-      cache: "no-store",
-    });
-
-    if (!response.ok) {
+    if (status < 200 || status >= 300) {
       return NextResponse.json(
         {
           success: false,
@@ -77,8 +101,6 @@ export async function POST(request: Request) {
         { status: 502 }
       );
     }
-
-    const data = await response.json();
 
     const routeCoordinates = data?.routes?.[0]?.geometry?.coordinates;
 

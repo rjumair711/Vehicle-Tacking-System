@@ -6,6 +6,10 @@ import { getTrip, listTrips } from '@/lib/trips';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+// First view of a trip may road-match it through the
+// throttled public OSRM server (budget ~50 s).
+export const maxDuration = 60;
+
 export async function GET(req: Request) {
   const session = await getSession();
 
