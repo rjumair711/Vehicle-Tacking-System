@@ -1,8 +1,9 @@
 
 'use client';
 
-import type {
-  TripRouteDetail
+import {
+  ROUTE_COLOR,
+  type TripRouteDetail
 } from './TripRouteLayer';
 
 export default function TripRouteLegend({
@@ -12,6 +13,8 @@ export default function TripRouteLegend({
 }) {
   const status =
     trip.road_match_status || 'gps-only';
+
+  const gpsOnly = status === 'gps-only';
 
   const label =
     status === 'matched'
@@ -26,15 +29,29 @@ export default function TripRouteLegend({
         {label}
       </p>
 
+      {gpsOnly && (
+        <p className="mb-2 rounded-md bg-amber-500/10 px-2 py-1 text-amber-700 dark:text-amber-400">
+          {trip.road_match_configured === false
+            ? "Road matching isn't configured, so the raw GPS trace is shown."
+            : 'Road matching is unavailable right now, so the raw GPS trace is shown.'}
+        </p>
+      )}
+
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-muted-foreground">
         <span className="inline-flex items-center gap-2">
-          <span className="h-1 w-6 rounded-full bg-emerald-600" />
-          Road-matched
+          <span
+            className="h-1.5 w-6 rounded-full"
+            style={{ backgroundColor: ROUTE_COLOR, opacity: 0.9 }}
+          />
+          {gpsOnly ? 'Recorded GPS route' : 'Route (road-matched)'}
         </span>
 
         <span className="inline-flex items-center gap-2">
-          <span className="w-6 border-t-[3px] border-dashed border-amber-600" />
-          GPS-only
+          <span
+            className="h-1.5 w-6 rounded-full"
+            style={{ backgroundColor: ROUTE_COLOR, opacity: 0.45 }}
+          />
+          Inferred connection
         </span>
 
         <span className="inline-flex items-center gap-2">
@@ -56,8 +73,7 @@ export default function TripRouteLegend({
       </div>
 
       <p className="mt-2 text-muted-foreground">
-        Uncertain sections may not reflect
-        the exact roads traveled.
+        Connections across missing GPS data are estimated.
       </p>
     </div>
   );

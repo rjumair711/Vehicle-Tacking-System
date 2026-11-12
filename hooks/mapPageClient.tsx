@@ -214,6 +214,21 @@ function parseTrip(
       raw.roadMatchStatus ??
       'gps-only',
 
+    route_line:
+      raw.route_line ??
+      raw.routeLine ??
+      [],
+
+    inferred_ranges:
+      raw.inferred_ranges ??
+      raw.inferredRanges ??
+      [],
+
+    road_match_configured:
+      raw.road_match_configured ??
+      raw.roadMatchConfigured ??
+      undefined,
+
     gps_points_count: numberValue(
       raw.gps_points_count ??
       raw.gpsPointsCount
@@ -448,7 +463,7 @@ function TripSummary({
             {hasRoadMatch
               ? 'The GPS observations have been matched to nearby roads. This is an estimate based on the recorded positions.'
               : partial
-                ? 'Some sections follow matched roads. Other sections use raw GPS observations.'
+                ? 'Most of the route follows matched roads. Sections the matcher could not place are estimated connections.'
                 : 'A reliable road match is unavailable. The recorded GPS trace is displayed instead.'}
           </p>
         </div>

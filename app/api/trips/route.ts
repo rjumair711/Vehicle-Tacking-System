@@ -67,6 +67,13 @@ export async function GET(req: Request) {
 
             routeGeoJson: trip.route_geojson,
 
+            // One continuous [lng, lat] line, plus the
+            // index ranges that are estimated connectors
+            // rather than road-matched GPS.
+            routeLine: trip.route_line,
+            inferredRanges: trip.inferred_ranges,
+            roadMatchConfigured: trip.road_match_configured,
+
             // Road matching result.
             roadSegments: trip.road_segments,
             gpsSegments: trip.gps_segments,
