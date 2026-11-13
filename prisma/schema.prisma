@@ -85,6 +85,12 @@ model TripHistory {
   // PostGIS geometry(LineString, 4326)
   route         Unsupported("geometry(LineString, 4326)")?
 
+  // Saved OSRM road match (prisma/sql/005_trip_matched_route.sql).
+  // Written by lib/trips.ts with raw SQL.
+  matchedRoute     Unsupported("geometry(LineString, 4326)")? @map("matched_route")
+  matchedRouteMeta Json?     @map("matched_route_meta")
+  matchedRouteAt   DateTime? @map("matched_route_at") @db.Timestamptz(6)
+
   tracker       Tracker @relation(fields: [trackerId], references: [trackerId], onDelete: Cascade)
 
   @@unique([trackerId, tripDate], map: "unique_tracker_trip_date")
