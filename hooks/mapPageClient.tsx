@@ -92,6 +92,8 @@ type TripDetail = TripRouteDetail & {
   maxSpeed: number;
 
   status: 'active' | 'completed';
+
+  road_match_complete: boolean;
 };
 
 type TripApiResponse = {
@@ -232,8 +234,53 @@ function parseTrip(
     gps_points_count: numberValue(
       raw.gps_points_count ??
       raw.gpsPointsCount
-    )
+    ),
+
+    road_match_pending: Boolean(
+      raw.road_match_pending ??
+      raw.roadMatchPending
+    ),
+
+    road_match_complete:
+      (raw.road_match_complete ??
+        raw.roadMatchComplete) !== false
   };
+}
+
+// Requests after the stored route has been drawn. Each
+// one resumes where the previous stopped (the server
+// caches finished OSRM calls), so long trips finish
+// over a few requests.
+const MAX_MATCH_ATTEMPTS = 4;
+
+async function fetchTrip(
+  tripId: string,
+  match: boolean,
+  signal: AbortSignal
+): Promise<TripDetail> {
+  const response = await fetch(
+    `/api/trips?tripId=${encodeURIComponent(tripId)}${
+      match ? '&match=1' : ''
+    }`,
+    {
+      method: 'GET',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      signal
+    }
+  );
+
+  const data =
+    await response.json() as TripApiResponse;
+
+  if (!response.ok || !data.success || !data.trip) {
+    throw new Error(
+      data.message ||
+      `Unable to load trip (${response.status})`
+    );
+  }
+
+  return parseTrip(data.trip);
 }
 
 function displayDate(date: Date): string {
@@ -327,6 +374,9 @@ function TripSummary({
 
   const partial =
     routeStatus === 'partial';
+
+  const matching =
+    Boolean(trip.road_match_pending);
 
   return (
     <Card className="border-border bg-card shadow-sm">
@@ -442,7 +492,9 @@ function TripSummary({
           <div className="flex items-center gap-2">
             <span
               className={`h-2.5 w-2.5 rounded-full ${
-                hasRoadMatch
+                matching
+                  ? 'animate-pulse bg-primary'
+                  : hasRoadMatch
                   ? 'bg-emerald-500'
                   : partial
                     ? 'bg-amber-500'
@@ -451,7 +503,9 @@ function TripSummary({
             />
 
             <span className="text-sm font-medium text-foreground">
-              {hasRoadMatch
+              {matching
+                ? 'Matching to roads…'
+                : hasRoadMatch
                 ? 'Matched to roads'
                 : partial
                   ? 'Partially matched'
@@ -460,7 +514,9 @@ function TripSummary({
           </div>
 
           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-            {hasRoadMatch
+            {matching
+              ? 'Showing the recorded GPS route. It will switch to the road-matched route automatically when it is ready.'
+              : hasRoadMatch
               ? 'The GPS observations have been matched to nearby roads. This is an estimate based on the recorded positions.'
               : partial
                 ? 'Most of the route follows matched roads. Sections the matcher could not place are estimated connections.'
@@ -560,32 +616,74 @@ export default function MapPage() {
 
     setTripLoading(true);
 
-    const loadTrip = async () => {
+    // Step 2: road-match in the background and swap
+    // the result in only once it is final. Until then
+    // (or if it fails) the stored line stays on screen.
+    const matchRoad = async () => {
       try {
-        const response = await fetch(
-          `/api/trips?tripId=${encodeURIComponent(
-            tripIdFromUrl
-          )}`,
-          {
-            method: 'GET',
-            credentials: 'same-origin',
-            cache: 'no-store',
-            signal: controller.signal
+        for (
+          let attempt = 0;
+          attempt < MAX_MATCH_ATTEMPTS;
+          attempt++
+        ) {
+          const matched = await fetchTrip(
+            tripIdFromUrl,
+            true,
+            controller.signal
+          );
+
+          if (!matched.road_match_complete) continue;
+
+          const routeLine = matched.route_line || [];
+
+          if (
+            matched.road_match_status !== 'gps-only' &&
+            routeLine.length >= 2
+          ) {
+            setSelectedTrip(previous =>
+              previous && previous.id === matched.id
+                ? {
+                    ...previous,
+                    route_line: matched.route_line,
+                    inferred_ranges: matched.inferred_ranges,
+                    road_segments: matched.road_segments,
+                    gps_segments: matched.gps_segments,
+                    road_match_status: matched.road_match_status,
+                    road_match_configured:
+                      matched.road_match_configured,
+                    gps_points_count: matched.gps_points_count,
+                    road_match_complete: true
+                  }
+                : previous
+            );
           }
-        );
 
-        const data =
-          await response.json() as TripApiResponse;
-
-        if (!response.ok || !data.success || !data.trip) {
-          throw new Error(
-            data.message ||
-            `Unable to load trip (${response.status})`
+          break;
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        console.warn('Road matching failed:', error);
+      } finally {
+        if (!controller.signal.aborted) {
+          setSelectedTrip(previous =>
+            previous
+              ? { ...previous, road_match_pending: false }
+              : previous
           );
         }
+      }
+    };
 
-        const parsed = parseTrip(
-          data.trip
+    // Step 1: show the trip with the route stored in
+    // the database (or an already saved road match).
+    const loadTrip = async () => {
+      let pending = false;
+
+      try {
+        const parsed = await fetchTrip(
+          tripIdFromUrl,
+          false,
+          controller.signal
         );
 
         if (
@@ -600,6 +698,7 @@ export default function MapPage() {
 
         if (!controller.signal.aborted) {
           setSelectedTrip(parsed);
+          pending = Boolean(parsed.road_match_pending);
         }
       } catch (error) {
         if (controller.signal.aborted) {
@@ -616,6 +715,10 @@ export default function MapPage() {
           setLoadedTripId(tripIdFromUrl);
           setTripLoading(false);
         }
+      }
+
+      if (pending && !controller.signal.aborted) {
+        await matchRoad();
       }
     };
 
@@ -733,7 +836,7 @@ export default function MapPage() {
                   </p>
 
                   <p className="text-center text-xs text-muted-foreground">
-                    Loading GPS points and road-matched sections
+                    Loading the recorded GPS route
                   </p>
                 </div>
               ) : currentTrip ? (

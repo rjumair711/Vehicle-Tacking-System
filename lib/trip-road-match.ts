@@ -971,6 +971,33 @@ const inFlight = new Map<string, Promise<MatchOutcome>>();
  * cached for 5 minutes regardless of new points, to keep
  * the request rate to the OSRM server low.
  */
+function matchKey(
+  samples: GpsSample[],
+  cacheKey: string,
+  isLive: boolean
+): string {
+  return isLive
+    ? `${cacheKey}:live`
+    : `${cacheKey}:${tripPointsHash(samples)}`;
+}
+
+/**
+ * A finished match already in memory, or null. Never
+ * calls OSRM, so the first trip response stays fast.
+ */
+export function peekRecordedMatch(
+  samples: GpsSample[],
+  cacheKey: string,
+  isLive = false
+): MatchOutcome | null {
+  if (!BASE_URL) return null;
+
+  const cached = cache.get(matchKey(samples, cacheKey, isLive));
+  return cached && cached.expires > Date.now()
+    ? cached.data
+    : null;
+}
+
 export async function matchRecordedRoute(
   samples: GpsSample[],
   cacheKey: string,
@@ -983,9 +1010,7 @@ export async function matchRecordedRoute(
     };
   }
 
-  const key = isLive
-    ? `${cacheKey}:live`
-    : `${cacheKey}:${tripPointsHash(samples)}`;
+  const key = matchKey(samples, cacheKey, isLive);
 
   const cached = cache.get(key);
   if (cached && cached.expires > Date.now()) {

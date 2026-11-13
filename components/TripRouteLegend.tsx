@@ -15,6 +15,7 @@ export default function TripRouteLegend({
     trip.road_match_status || 'gps-only';
 
   const gpsOnly = status === 'gps-only';
+  const matching = Boolean(trip.road_match_pending);
 
   const label =
     status === 'matched'
@@ -29,7 +30,17 @@ export default function TripRouteLegend({
         {label}
       </p>
 
-      {gpsOnly && (
+      {matching && (
+        <p
+          role="status"
+          className="mb-2 flex items-center gap-2 rounded-md bg-primary/10 px-2 py-1 text-primary"
+        >
+          <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+          Matching the route to roads… the recorded GPS route is shown until it is ready.
+        </p>
+      )}
+
+      {gpsOnly && !matching && (
         <p className="mb-2 rounded-md bg-amber-500/10 px-2 py-1 text-amber-700 dark:text-amber-400">
           {trip.road_match_configured === false
             ? "Road matching isn't configured, so the raw GPS trace is shown."

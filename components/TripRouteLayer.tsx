@@ -3,7 +3,8 @@
 
 import {
   useEffect,
-  useMemo
+  useMemo,
+  useRef
 } from 'react';
 
 import {
@@ -39,6 +40,10 @@ export interface TripRouteDetail {
     | null;
 
   road_match_configured?: boolean;
+
+  // Road matching is still running in the background;
+  // the stored GPS line is shown meanwhile.
+  road_match_pending?: boolean;
 
   route_geojson?: string | null;
   routeGeojson?: string | null;
@@ -168,6 +173,7 @@ function ZoomToTrip({
   points: LatLng[];
 }) {
   const map = useMap();
+  const fitted = useRef(false);
 
   const signature = points.length
     ? [
@@ -178,7 +184,11 @@ function ZoomToTrip({
     : '';
 
   useEffect(() => {
-    if (!points.length) return;
+    // Fit once per trip (the map is keyed by trip id):
+    // swapping in the road-matched line later must not
+    // move a view the user may have zoomed or panned.
+    if (!points.length || fitted.current) return;
+    fitted.current = true;
 
     if (points.length === 1) {
       map.setView(points[0], 16);

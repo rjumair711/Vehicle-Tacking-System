@@ -7,6 +7,8 @@ import {
   deriveRoadSegments,
   legacyGeometrySamples,
   matchRecordedRoute,
+  peekRecordedMatch,
+  roadMatchingConfigured,
   ROUTE_MATCH_VERSION,
   tripPointsHash,
   type Coordinate,
@@ -743,10 +745,30 @@ async function persistMatch(
   `;
 }
 
-// Retrieve only a trip the user is authorized to view.
+export interface RoadMatchProgress {
+  // True when the client should request the road match
+  // separately (mode 'stored' only).
+  road_match_pending: boolean;
+  // False when matching was cut short (time / rate
+  // limit); asking again resumes where it stopped.
+  road_match_complete: boolean;
+}
+
+/**
+ * Retrieve only a trip the user is authorized to view.
+ *
+ * mode 'stored' (fast): a saved or in-memory road match
+ * when one exists; otherwise the stored PostGIS route
+ * (route_geojson) with road_match_pending = true.
+ *
+ * mode 'match': runs OSRM matching (may take up to
+ * ~50 s on the public server) and saves finished
+ * matches of completed trips.
+ */
 export async function getTrip(
   session: Session,
-  tripId: string
+  tripId: string,
+  mode: 'stored' | 'match' = 'match'
 ) {
   const rows = await tripsQuery(
     session,
@@ -761,6 +783,12 @@ export async function getTrip(
   const points = await loadMovementPoints(trip);
   const completed = trip.status === 'completed';
   const hash = tripPointsHash(points);
+  const cacheKey = `trip:${trip.trip_id}`;
+
+  const done: RoadMatchProgress = {
+    road_match_pending: false,
+    road_match_complete: true
+  };
 
   if (completed) {
     const persisted = await loadPersistedMatch(
@@ -771,12 +799,42 @@ export async function getTrip(
       return null;
     });
 
-    if (persisted) return { ...trip, ...persisted };
+    if (persisted) return { ...trip, ...persisted, ...done };
+  }
+
+  if (mode === 'stored') {
+    const cached = peekRecordedMatch(
+      points,
+      cacheKey,
+      !completed
+    );
+
+    if (cached) {
+      return { ...trip, ...cached.result, ...done };
+    }
+
+    const configured = roadMatchingConfigured();
+
+    // Empty route_line / segments: the map draws
+    // route_geojson, the line stored in the database.
+    const stored: RoadMatchResult & RoadMatchProgress = {
+      route_line: [],
+      inferred_ranges: [],
+      road_segments: [],
+      gps_segments: [],
+      road_match_status: 'gps-only',
+      road_match_configured: configured,
+      gps_points_count: points.length,
+      road_match_pending: configured && points.length >= 2,
+      road_match_complete: !configured
+    };
+
+    return { ...trip, ...stored };
   }
 
   const { result, complete } = await matchRecordedRoute(
     points,
-    `trip:${trip.trip_id}`,
+    cacheKey,
     !completed
   );
 
@@ -793,8 +851,14 @@ export async function getTrip(
     );
   }
 
+  const progress: RoadMatchProgress = {
+    road_match_pending: false,
+    road_match_complete: complete
+  };
+
   return {
     ...trip,
-    ...result
+    ...result,
+    ...progress
   };
 }

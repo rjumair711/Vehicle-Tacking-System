@@ -6,8 +6,10 @@ import { getTrip, listTrips } from '@/lib/trips';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-// First view of a trip may road-match it through the
-// throttled public OSRM server (budget ~50 s).
+// ?tripId=X returns at once with the stored route (or a
+// saved road match). ?tripId=X&match=1 runs OSRM road
+// matching, which on the throttled public server can
+// take up to ~50 s.
 export const maxDuration = 60;
 
 export async function GET(req: Request) {
@@ -23,7 +25,12 @@ export async function GET(req: Request) {
 
     // Single trip with detailed GPS road matching.
     if (tripId) {
-      const trip = await getTrip(session, tripId);
+      const mode =
+        searchParams.get('match') === '1'
+          ? 'match'
+          : 'stored';
+
+      const trip = await getTrip(session, tripId, mode);
 
       if (!trip) {
         return NextResponse.json(
@@ -77,6 +84,12 @@ export async function GET(req: Request) {
             routeLine: trip.route_line,
             inferredRanges: trip.inferred_ranges,
             roadMatchConfigured: trip.road_match_configured,
+
+            // Two-step loading: pending = request
+            // ?match=1 next; complete = false means
+            // matching stopped early, ask again.
+            roadMatchPending: trip.road_match_pending,
+            roadMatchComplete: trip.road_match_complete,
 
             // Road matching result.
             roadSegments: trip.road_segments,
