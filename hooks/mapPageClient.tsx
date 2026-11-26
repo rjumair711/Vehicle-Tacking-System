@@ -16,13 +16,21 @@ import dynamic from 'next/dynamic';
 import { useAuth } from '@/lib/authContext';
 
 import {
+  fetchAlerts,
   formatLastSeen,
-  formatSpeed
+  formatSpeed,
+  useApiData
 } from '@/lib/api';
 
-import { useLiveTrackers } from '@/lib/realtime';
+import {
+  useLiveTrackers,
+  useRealtime
+} from '@/lib/realtime';
 
-import type { TrackingDevice } from '@/types';
+import type {
+  Alert,
+  TrackingDevice
+} from '@/types';
 
 import type {
   TripRouteDetail
@@ -563,6 +571,23 @@ export default function MapPage() {
     live
   } = useLiveTrackers(isTripView);
 
+  // Crash alerts, marked on the map. Re-read in the
+  // background and at once when a new alert is pushed.
+  const {
+    data: alerts,
+    refresh: refreshAlerts
+  } = useApiData<Alert[]>(
+    fetchAlerts,
+    [],
+    30000
+  );
+
+  useRealtime(event => {
+    if (event.type === 'alert') {
+      void refreshAlerts();
+    }
+  });
+
   const [selectedTrip, setSelectedTrip] =
     useState<TripDetail | null>(null);
 
@@ -744,6 +769,33 @@ export default function MapPage() {
       ? selectedTrip
       : null;
 
+  const crashAlerts = alerts.filter(
+    alert =>
+      alert.type === 'crash' &&
+      alert.location
+  );
+
+  // Live map: crashes still waiting to be resolved.
+  const liveCrashAlerts = crashAlerts.filter(
+    alert => !alert.isResolved
+  );
+
+  // Trip map: crashes of this tracker during the trip.
+  const tripCrashAlerts = currentTrip
+    ? crashAlerts.filter(alert => {
+        const at = alert.timestamp.getTime();
+        const end =
+          currentTrip.endTime?.getTime() ??
+          Date.now();
+
+        return (
+          alert.trackerId === currentTrip.trackerId &&
+          at >= currentTrip.startTime.getTime() &&
+          at <= end
+        );
+      })
+    : [];
+
   const isCurrentTripLoading =
     isTripView &&
     (
@@ -843,6 +895,7 @@ export default function MapPage() {
                 <TripHistoryMap
                   key={currentTrip.id}
                   trip={currentTrip}
+                  crashAlerts={tripCrashAlerts}
                 />
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
@@ -880,6 +933,7 @@ export default function MapPage() {
                   setIsSheetOpen(true);
                 }}
                 routePoints={[]}
+                crashAlerts={liveCrashAlerts}
               />
             )}
           </CardContent>

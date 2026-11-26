@@ -15,6 +15,8 @@ import TripRouteLayer, {
 } from '@/components/TripRouteLayer';
 
 import TripRouteLegend from '@/components/TripRouteLegend';
+import CrashMarkers from '@/components/CrashMarkers';
+import type { Alert } from '@/types';
 
 type Coordinate = [number, number];
 
@@ -77,9 +79,11 @@ function getInitialCenter(
 }
 
 export default function TripHistoryMap({
-  trip
+  trip,
+  crashAlerts = []
 }: {
   trip: TripRouteDetail;
+  crashAlerts?: Alert[];
 }) {
   const center = useMemo(
     () => getInitialCenter(trip),
@@ -87,31 +91,38 @@ export default function TripHistoryMap({
   );
 
   return (
-    <div className="relative h-full min-h-[350px] w-full overflow-hidden bg-muted">
-      <MapContainer
-        center={center}
-        zoom={14}
-        scrollWheelZoom
-        zoomControl
-        className="h-full w-full"
-        style={{
-          height: '100%',
-          width: '100%'
-        }}
-      >
-        <TileLayer
-          attribution="&copy; OpenStreetMap contributors"
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          maxZoom={19}
+    <div className="flex h-full min-h-[350px] w-full flex-col">
+      {/* The map takes the space the legend does not need. */}
+      <div className="min-h-[250px] flex-1 overflow-hidden bg-muted">
+        <MapContainer
+          center={center}
+          zoom={14}
+          scrollWheelZoom
+          zoomControl
+          className="h-full w-full"
+          style={{
+            height: '100%',
+            width: '100%'
+          }}
+        >
+          <TileLayer
+            attribution="&copy; OpenStreetMap contributors"
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            maxZoom={19}
+          />
+
+          <TripRouteLayer trip={trip} />
+
+          <CrashMarkers alerts={crashAlerts} />
+        </MapContainer>
+      </div>
+
+      {/* Legend sits below the map so it never covers the route. */}
+      <div className="border-t border-border p-3 sm:px-4">
+        <TripRouteLegend
+          trip={trip}
+          crashCount={crashAlerts.length}
         />
-
-        <TripRouteLayer trip={trip} />
-      </MapContainer>
-
-      <div className="pointer-events-none absolute bottom-4 left-3 right-3 z-[1000] sm:left-4">
-        <div className="pointer-events-auto max-w-lg">
-          <TripRouteLegend trip={trip} />
-        </div>
       </div>
     </div>
   );
