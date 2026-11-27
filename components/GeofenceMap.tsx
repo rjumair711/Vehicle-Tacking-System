@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   MapContainer,
   TileLayer,
+  AttributionControl,
   Polygon,
   Polyline,
   Marker,
@@ -336,12 +337,16 @@ export function GeofenceMap({
         zoom={12}
         scrollWheelZoom
         doubleClickZoom={!isDrawing}
-        className="h-full w-full"
+        attributionControl={false}
+        className="ktrack-map h-full w-full"
       >
         <FixMapSize />
 
+        {/* Only a small OpenStreetMap credit, no "Leaflet" prefix. */}
+        <AttributionControl position="bottomright" prefix={false} />
+
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
