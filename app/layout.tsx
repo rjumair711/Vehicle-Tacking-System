@@ -9,7 +9,7 @@ const _geist = Geist({ subsets: ['latin'] })
 const _geistMono = Geist_Mono({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'FleetTrack - GPS Vehicle Tracking System',
+  title: 'KTrack - GPS Vehicle Tracking System',
   description: 'Professional fleet management and real-time vehicle tracking platform',
   generator: 'v0.app',
   icons: {

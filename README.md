@@ -1,4 +1,4 @@
-# K-Track / FleetTrack Pro – GPS Vehicle Tracking System
+# KTrack – GPS Vehicle Tracking System
 
 > **Documentation update: 13 November 2026.** Describes the system as it is in `main`: firmware v5.0.0, two-step trip loading with saved OSRM road matches, 1-hour login sessions. All SQL migrations in `prisma/sql/` (001–005) are applied to the Neon database.
 

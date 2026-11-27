@@ -49,7 +49,7 @@ export function Sidebar() {
     <div className="flex h-full flex-col">
       {/* Logo */}
       <div className="border-b border-sidebar-border px-6 py-6">
-        <h1 className="font-bold text-sidebar-foreground">FleetTrack Pro</h1>
+        <h1 className="font-bold text-sidebar-foreground">KTrack</h1>
         <p className="text-xs text-sidebar-accent-foreground">Fleet Management</p>
       </div>
 

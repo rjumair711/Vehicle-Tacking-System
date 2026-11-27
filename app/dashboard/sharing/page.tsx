@@ -472,7 +472,7 @@ function VehicleSharing({
           </form>
 
           <p className="text-xs text-muted-foreground">
-            Registered viewers need an existing FleetTrack
+            Registered viewers need an existing KTrack
             account. For friends without accounts, use a
             temporary location link.
           </p>

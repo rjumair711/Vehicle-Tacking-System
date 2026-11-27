@@ -52,8 +52,8 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         from: RESET_EMAIL_FROM,
         to: [user.email],
-        subject: 'Reset your FleetTrack password',
-        text: `A password reset was requested for your FleetTrack account.\n\nOpen this link to choose a new password (valid for 15 minutes):\n${url.toString()}\n\nIf you did not request this, ignore this message.`,
+        subject: 'Reset your KTrack password',
+        text: `A password reset was requested for your KTrack account.\n\nOpen this link to choose a new password (valid for 15 minutes):\n${url.toString()}\n\nIf you did not request this, ignore this message.`,
       }),
       cache: 'no-store',
     });

@@ -124,7 +124,7 @@ export async function POST(
       return NextResponse.json(
         {
           message:
-            'This person does not have a FleetTrack account. Use Create Location Link instead.',
+            'This person does not have a KTrack account. Use Create Location Link instead.',
         },
         { status: 404 }
       );

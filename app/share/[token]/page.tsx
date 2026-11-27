@@ -160,7 +160,7 @@ export default function PublicLocationPage() {
             </div>
 
             <div>
-              <h1 className="font-bold">FleetTrack</h1>
+              <h1 className="font-bold">KTrack</h1>
               <p className="text-xs text-muted-foreground">
                 Shared Vehicle Location
               </p>

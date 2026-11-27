@@ -29,7 +29,7 @@ export function Header() {
       {/* Logo/Title */}
       <div className="flex items-center gap-2">
         <div className="h-8 w-8 rounded-lg bg-primary" />
-        <span className="hidden font-semibold text-foreground sm:inline">FleetTrack</span>
+        <span className="hidden font-semibold text-foreground sm:inline">KTrack</span>
       </div>
 
       {/* Right Section */}

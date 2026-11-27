@@ -58,8 +58,8 @@ export default function LoginPage() {
     <div className="flex min-h-screen flex-col items-center justify-center bg-linear-to-br from-background to-background/95 px-4 py-12 sm:px-6 lg:px-8">
       <div className="w-full max-w-md space-y-8">
         <div className="flex flex-col items-center text-center">
-          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary"><span className="text-xl font-bold text-primary-foreground">FT</span></div>
-          <h1 className="text-3xl font-bold text-foreground">FleetTrack</h1>
+          <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary"><span className="text-xl font-bold text-primary-foreground">KT</span></div>
+          <h1 className="text-3xl font-bold text-foreground">KTrack</h1>
           <p className="mt-2 text-sm text-muted-foreground">Professional KTrack Management System</p>
         </div>
         <Card className="border-border bg-card shadow-lg">
