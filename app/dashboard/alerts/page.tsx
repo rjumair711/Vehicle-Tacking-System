@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useAuth } from '@/lib/authContext';
 import { LIVE_REFRESH_MS, apiFetch, fetchAlerts, useApiData } from '@/lib/api';
 import { useRealtime } from '@/lib/realtime';
@@ -9,7 +10,24 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { AlertTriangle, CheckCircle, MapPin, Clock } from 'lucide-react';
+import { AlertTriangle, CheckCircle, MapPin, Clock, Map as MapIcon } from 'lucide-react';
+
+// Opens the live map zoomed to this alert's recorded position.
+function SeeOnMap({ alert }: { alert: AlertType }) {
+  if (!alert.location) return null;
+
+  return (
+    <Link
+      href={`/dashboard/map?alertId=${encodeURIComponent(alert.id)}`}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-muted"
+    >
+      <MapIcon className="h-3.5 w-3.5" />
+      See on Map
+    </Link>
+  );
+}
 
 export default function AlertsPage() {
   const { user, isLoading } = useAuth();
@@ -61,6 +79,11 @@ export default function AlertsPage() {
 
   const unresolved = visibleAlerts.filter((a) => !a.isResolved);
   const resolved = visibleAlerts.filter((a) => a.isResolved);
+
+  const openAlert = (alert: AlertType) => {
+    setSelectedAlert(alert);
+    setIsSheetOpen(true);
+  };
 
   const handleResolveAlert = async (alertId: string) => {
     try {
@@ -168,13 +191,18 @@ export default function AlertsPage() {
         <div className="space-y-3">
           <h2 className="text-lg font-semibold text-foreground">Unresolved Alerts</h2>
           {unresolved.map((alert) => (
-            <button
+            <div
               key={alert.id}
-              onClick={() => {
-                setSelectedAlert(alert);
-                setIsSheetOpen(true);
+              role="button"
+              tabIndex={0}
+              onClick={() => openAlert(alert)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  openAlert(alert);
+                }
               }}
-              className="w-full text-left rounded-lg border border-destructive/20 bg-destructive/5 hover:bg-destructive/10 transition-colors p-4"
+              className="w-full cursor-pointer text-left rounded-lg border border-destructive/20 bg-destructive/5 hover:bg-destructive/10 transition-colors p-4"
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-start gap-3 flex-1">
@@ -201,9 +229,12 @@ export default function AlertsPage() {
                   <p className="text-xs text-muted-foreground">
                     {alert.timestamp.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
                   </p>
+                  <div className="mt-1">
+                    <SeeOnMap alert={alert} />
+                  </div>
                 </div>
               </div>
-            </button>
+            </div>
           ))}
         </div>
       )}
@@ -214,24 +245,32 @@ export default function AlertsPage() {
           <h2 className="text-lg font-semibold text-foreground">Resolved Alerts</h2>
           <div className="space-y-2">
             {resolved.map((alert) => (
-              <button
+              <div
                 key={alert.id}
-                onClick={() => {
-                  setSelectedAlert(alert);
-                  setIsSheetOpen(true);
+                role="button"
+                tabIndex={0}
+                onClick={() => openAlert(alert)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    openAlert(alert);
+                  }
                 }}
-                className="w-full text-left rounded-lg border border-border bg-muted/50 hover:bg-muted transition-colors p-3"
+                className="w-full cursor-pointer text-left rounded-lg border border-border bg-muted/50 hover:bg-muted transition-colors p-3"
               >
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-3">
                   <div className="flex-1">
                     <p className="font-medium text-foreground line-through">{alert.trackerName}</p>
                     <p className="text-xs text-muted-foreground">{alert.message}</p>
                   </div>
-                  <Badge variant="outline" className="text-xs">
-                    RESOLVED
-                  </Badge>
+                  <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-2">
+                    <SeeOnMap alert={alert} />
+                    <Badge variant="outline" className="text-xs">
+                      RESOLVED
+                    </Badge>
+                  </div>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         </div>
@@ -298,6 +337,9 @@ export default function AlertsPage() {
                       <CardContent className="text-foreground font-mono text-sm break-words">
                         {selectedAlert.location.lat.toFixed(6)},{" "}
                         {selectedAlert.location.lng.toFixed(6)}
+                        <div className="mt-3 font-sans">
+                          <SeeOnMap alert={selectedAlert} />
+                        </div>
                       </CardContent>
                     </Card>
                   )}

@@ -206,12 +206,12 @@
 .hover\:text-sidebar-accent-foreground:hover {
   color: #1f2937;  /* hover text color */
 }
-/* Crash location marker on the maps (components/CrashMarkers.tsx) */
+/* Crash and geofence alert markers on the maps (components/CrashMarkers.tsx) */
 .crash-marker {
   position: relative;
-  width: 34px;
-  height: 30px;
-  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.4));
+  width: 24px;
+  height: 21px;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4));
 }
 
 .crash-marker svg {
@@ -222,10 +222,10 @@
   position: absolute;
   left: 50%;
   bottom: 0;
-  width: 34px;
-  height: 34px;
-  margin-left: -17px;
-  margin-bottom: -15px;
+  width: 24px;
+  height: 24px;
+  margin-left: -12px;
+  margin-bottom: -11px;
   border-radius: 9999px;
   background: rgba(220, 38, 38, 0.35);
   animation: crash-pulse 1.6s ease-out infinite;

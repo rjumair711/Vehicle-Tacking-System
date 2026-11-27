@@ -107,16 +107,21 @@ interface VehicleMapProps {
 
   /** Crash alerts to mark on the map with a red warning triangle. */
   crashAlerts?: Alert[];
+
+  /** Alert opened with "See on Map": the map zooms to it. */
+  focusedAlertId?: string;
 }
 
 function Recenter({
   vehicles,
   selectedVehicleId,
   routePoints,
+  paused,
 }: {
   vehicles: TrackingDevice[];
   selectedVehicleId?: string;
   routePoints?: RoutePoint[];
+  paused?: boolean;
 }) {
   const map = useMap();
   const hasFittedFleet = useRef(false);
@@ -128,6 +133,9 @@ function Recenter({
   const selectedLng = selectedLocation?.lng;
 
   useEffect(() => {
+    // An alert is being shown: leave the view on it.
+    if (paused) return;
+
     if (routePoints && routePoints.length > 0) {
       const bounds = L.latLngBounds(
         routePoints.map((point) => [point.lat, point.lng])
@@ -158,7 +166,7 @@ function Recenter({
         { padding: [40, 40], maxZoom: 15 }
       );
     }
-  }, [vehicles.length, selectedLat, selectedLng, routePoints, map]);
+  }, [vehicles.length, selectedLat, selectedLng, routePoints, paused, map]);
 
   return null;
 }
@@ -169,6 +177,7 @@ export function VehicleMap({
   onVehicleSelect,
   routePoints,
   crashAlerts = [],
+  focusedAlertId,
 }: VehicleMapProps) {
   const center: [number, number] = [33.6844, 73.0479]; // Islamabad default
 
@@ -200,6 +209,7 @@ export function VehicleMap({
           vehicles={validVehicles}
           selectedVehicleId={selectedVehicleId}
           routePoints={routePoints}
+          paused={Boolean(focusedAlertId)}
         />
 
         {polylinePositions.length > 1 && (
@@ -264,7 +274,7 @@ export function VehicleMap({
           </Marker>
         ))}
 
-        <CrashMarkers alerts={crashAlerts} />
+        <CrashMarkers alerts={crashAlerts} focusedAlertId={focusedAlertId} />
       </MapContainer>
     </div>
   );

@@ -121,7 +121,12 @@ export default function TripHistoryMap({
       <div className="border-t border-border p-3 sm:px-4">
         <TripRouteLegend
           trip={trip}
-          crashCount={crashAlerts.length}
+          crashCount={
+            crashAlerts.filter(a => a.type === 'crash').length
+          }
+          geofenceCount={
+            crashAlerts.filter(a => a.type === 'geofence').length
+          }
         />
       </div>
     </div>

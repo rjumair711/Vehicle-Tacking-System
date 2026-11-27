@@ -8,10 +8,12 @@ import {
 
 export default function TripRouteLegend({
   trip,
-  crashCount = 0
+  crashCount = 0,
+  geofenceCount = 0
 }: {
   trip: TripRouteDetail;
   crashCount?: number;
+  geofenceCount?: number;
 }) {
   const status =
     trip.road_match_status || 'gps-only';
@@ -85,6 +87,17 @@ export default function TripRouteLegend({
               <circle cx="17" cy="23.8" r="1.8" fill="#fff" />
             </svg>
             {crashCount === 1 ? '1 crash on this trip' : `${crashCount} crashes on this trip`}
+          </span>
+        )}
+
+        {geofenceCount > 0 && (
+          <span className="inline-flex items-center gap-2 font-medium text-yellow-700 dark:text-yellow-400">
+            <svg width="14" height="12" viewBox="0 0 34 30" aria-hidden="true">
+              <path d="M17 2 L32 28 L2 28 Z" fill="#facc15" />
+              <rect x="15.5" y="10" width="3" height="10" rx="1.5" fill="#1f2937" />
+              <circle cx="17" cy="23.8" r="1.8" fill="#1f2937" />
+            </svg>
+            {geofenceCount === 1 ? '1 geofence alert' : `${geofenceCount} geofence alerts`}
           </span>
         )}
 

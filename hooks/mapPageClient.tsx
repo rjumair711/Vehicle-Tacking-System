@@ -560,6 +560,10 @@ export default function MapPage() {
   const trackerIdFromUrl =
     searchParams.get('trackerId');
 
+  // Set by "See on Map" on the Alerts page.
+  const alertIdFromUrl =
+    searchParams.get('alertId') || undefined;
+
   const isTripView =
     Boolean(tripIdFromUrl);
 
@@ -769,20 +773,39 @@ export default function MapPage() {
       ? selectedTrip
       : null;
 
-  const crashAlerts = alerts.filter(
+  // Crash and geofence alerts that have a position.
+  const mapAlerts = alerts.filter(
     alert =>
-      alert.type === 'crash' &&
+      (alert.type === 'crash' ||
+        alert.type === 'geofence') &&
       alert.location
   );
 
-  // Live map: crashes still waiting to be resolved.
-  const liveCrashAlerts = crashAlerts.filter(
-    alert => !alert.isResolved
+  // The alert opened with "See on Map" (any type,
+  // resolved or not).
+  const focusedAlert = alertIdFromUrl
+    ? alerts.find(
+        alert =>
+          alert.id === alertIdFromUrl &&
+          alert.location
+      )
+    : undefined;
+
+  // Live map: alerts still waiting to be resolved,
+  // plus the alert being looked at.
+  const liveMapAlerts = mapAlerts.filter(
+    alert =>
+      !alert.isResolved &&
+      alert.id !== focusedAlert?.id
   );
 
-  // Trip map: crashes of this tracker during the trip.
-  const tripCrashAlerts = currentTrip
-    ? crashAlerts.filter(alert => {
+  if (focusedAlert) {
+    liveMapAlerts.push(focusedAlert);
+  }
+
+  // Trip map: alerts of this tracker during the trip.
+  const tripMapAlerts = currentTrip
+    ? mapAlerts.filter(alert => {
         const at = alert.timestamp.getTime();
         const end =
           currentTrip.endTime?.getTime() ??
@@ -843,7 +866,9 @@ export default function MapPage() {
                     ? currentTrip
                       ? `${currentTrip.trackerName || currentTrip.trackerId} · ${displayDate(currentTrip.startTime)}`
                       : tripError || 'Loading recorded route'
-                    : trackersError ||
+                    : focusedAlert
+                      ? `Showing ${focusedAlert.type} alert · ${focusedAlert.trackerName ?? focusedAlert.trackerId} · ${focusedAlert.timestamp.toLocaleString()}`
+                      : trackersError ||
                       (
                         live
                           ? 'Real-time GPS locations'
@@ -895,7 +920,7 @@ export default function MapPage() {
                 <TripHistoryMap
                   key={currentTrip.id}
                   trip={currentTrip}
-                  crashAlerts={tripCrashAlerts}
+                  crashAlerts={tripMapAlerts}
                 />
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
@@ -933,7 +958,8 @@ export default function MapPage() {
                   setIsSheetOpen(true);
                 }}
                 routePoints={[]}
-                crashAlerts={liveCrashAlerts}
+                crashAlerts={liveMapAlerts}
+                focusedAlertId={focusedAlert?.id}
               />
             )}
           </CardContent>
