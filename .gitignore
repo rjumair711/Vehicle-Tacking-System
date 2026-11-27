@@ -18,3 +18,7 @@ node_modules/
 # Tracker device token (see backend/secrets.example.h)
 backend/secrets.h
 !.env.example
+
+# Thesis/report documents kept out of the repo
+*.docx
+DIAGRAM_PROMPTS.md

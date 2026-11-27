@@ -10,7 +10,8 @@ import {
   useMap,
 } from "react-leaflet";
 import L from "leaflet";
-import { TrackingDevice } from "@/types";
+import { Alert, TrackingDevice } from "@/types";
+import CrashMarkers from "@/components/CrashMarkers";
 
 // Fix default marker icons in Next.js
 import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
@@ -103,6 +104,9 @@ interface VehicleMapProps {
    * ]
    */
   routePoints?: RoutePoint[];
+
+  /** Crash alerts to mark on the map with a red warning triangle. */
+  crashAlerts?: Alert[];
 }
 
 function Recenter({
@@ -164,6 +168,7 @@ export function VehicleMap({
   selectedVehicleId,
   onVehicleSelect,
   routePoints,
+  crashAlerts = [],
 }: VehicleMapProps) {
   const center: [number, number] = [33.6844, 73.0479]; // Islamabad default
 
@@ -258,6 +263,8 @@ export function VehicleMap({
             </Popup>
           </Marker>
         ))}
+
+        <CrashMarkers alerts={crashAlerts} />
       </MapContainer>
     </div>
   );
