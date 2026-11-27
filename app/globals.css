@@ -6,6 +6,10 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  /* Height of the sidebar header and the top bar, border included, so their
+     bottom borders form one line (components/AppShell.tsx, Sidebar.tsx). */
+  --header-height: 64px;
+
   /* Light theme */
   --background: oklch(0.99 0 0);
   --foreground: oklch(0.15 0 0);
@@ -179,6 +183,20 @@
      so page maps stay below sheets, dialogs and popovers (z-50). */
   isolation: isolate;
   z-index: 0;
+}
+
+/* Small, subtle OpenStreetMap credit (required by the OSM tile policy) on
+   the maps that use the ktrack-map class. */
+.ktrack-map .leaflet-control-attribution {
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 0 4px;
+  background: rgba(255, 255, 255, 0.55);
+  color: #6b7280;
+}
+
+.ktrack-map .leaflet-control-attribution a {
+  color: inherit;
 }
 
 /* Fix tile seams/glitches on some browsers */

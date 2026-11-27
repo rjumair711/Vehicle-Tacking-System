@@ -27,7 +27,7 @@ export function AppShell({ children }: AppShellProps) {
       {/* Main Content Area */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Header */}
-        <header className="border-b border-border bg-card">
+        <header className="box-border h-[var(--header-height)] shrink-0 border-b border-border bg-card">
           <Header />
         </header>
 

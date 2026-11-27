@@ -25,7 +25,7 @@ export function Header() {
   };
 
   return (
-    <div className="flex h-16 items-center justify-between px-4 sm:px-6">
+    <div className="flex h-full items-center justify-between px-4 sm:px-6">
       {/* Logo/Title */}
       <div className="flex items-center gap-2">
         <div className="h-8 w-8 rounded-lg bg-primary" />

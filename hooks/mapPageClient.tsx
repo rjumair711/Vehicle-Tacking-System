@@ -843,10 +843,11 @@ export default function MapPage() {
     router.push('/dashboard/trips');
 
   return (
-    <div className="flex h-full flex-col gap-4 p-4 sm:p-6 lg:flex-row">
-      <div className="min-w-0 flex-1">
-        <Card className="h-full overflow-hidden border-border bg-card shadow-sm">
-          <CardHeader className="pb-3">
+    <div className="flex min-h-full flex-col gap-4 p-4 sm:p-6 xl:h-full xl:flex-row">
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* No card padding or gap around the map: it runs edge to edge. */}
+        <Card className="gap-0 overflow-hidden border-border bg-card py-0 shadow-sm xl:flex-1">
+          <CardHeader className="py-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <CardTitle className="flex items-center gap-2 text-xl">
@@ -902,7 +903,9 @@ export default function MapPage() {
             </div>
           </CardHeader>
 
-          <CardContent className="h-[60vh] min-h-[350px] p-0 lg:h-[75vh]">
+          {/* Small screens: about 60vh. From 1280px: the rest of the viewport height,
+              at least 500px. */}
+          <CardContent className="h-[60vh] min-h-[350px] p-0 xl:h-auto xl:min-h-[500px] xl:flex-1">
             {isTripView ? (
               isCurrentTripLoading ? (
                 <div className="flex h-full flex-col items-center justify-center gap-3 bg-muted/30">
@@ -966,7 +969,7 @@ export default function MapPage() {
         </Card>
 
         {isTripView && currentTrip && (
-          <div className="mt-4 lg:hidden">
+          <div className="mt-4 xl:hidden">
             <TripSummary
               trip={currentTrip}
               speedUnit={user.speedUnit}
@@ -976,7 +979,13 @@ export default function MapPage() {
         )}
       </div>
 
-      <aside className="hidden w-80 shrink-0 lg:block">
+      {/* Trackers panel: fixed 320px beside the map from 1280px wide; below the
+          map on smaller screens (trip details already appear below it there). */}
+      <aside
+        className={`w-full shrink-0 xl:block xl:w-80 ${
+          isTripView ? 'hidden' : ''
+        }`}
+      >
         {isTripView ? (
           currentTrip ? (
             <TripSummary

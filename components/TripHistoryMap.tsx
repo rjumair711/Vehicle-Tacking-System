@@ -1,10 +1,12 @@
 
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import {
+  AttributionControl,
   MapContainer,
-  TileLayer
+  TileLayer,
+  useMap
 } from 'react-leaflet';
 
 // Leaflet CSS is loaded once, globally, from
@@ -78,6 +80,20 @@ function getInitialCenter(
   return [33.6, 73.1];
 }
 
+// Re-measure the map whenever its box changes size (mount, window resize,
+// layout changes), so Leaflet draws tiles with no grey gaps.
+function FixMapSize() {
+  const map = useMap();
+
+  useEffect(() => {
+    const observer = new ResizeObserver(() => map.invalidateSize());
+    observer.observe(map.getContainer());
+    return () => observer.disconnect();
+  }, [map]);
+
+  return null;
+}
+
 export default function TripHistoryMap({
   trip,
   crashAlerts = []
@@ -99,14 +115,20 @@ export default function TripHistoryMap({
           zoom={14}
           scrollWheelZoom
           zoomControl
-          className="h-full w-full"
+          attributionControl={false}
+          className="ktrack-map h-full w-full"
           style={{
             height: '100%',
             width: '100%'
           }}
         >
+          <FixMapSize />
+
+          {/* Only a small OpenStreetMap credit, no "Leaflet" prefix. */}
+          <AttributionControl position="bottomright" prefix={false} />
+
           <TileLayer
-            attribution="&copy; OpenStreetMap contributors"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             maxZoom={19}
           />

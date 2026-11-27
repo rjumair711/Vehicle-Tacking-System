@@ -7,6 +7,7 @@ import {
   Marker,
   Popup,
   Polyline,
+  AttributionControl,
   useMap,
 } from "react-leaflet";
 import L from "leaflet";
@@ -196,12 +197,16 @@ export function VehicleMap({
         center={center}
         zoom={12}
         scrollWheelZoom
-        className="h-full w-full"
+        attributionControl={false}
+        className="ktrack-map h-full w-full"
       >
+        {/* Only a small OpenStreetMap credit, no "Leaflet" prefix. */}
+        <AttributionControl position="bottomright" prefix={false} />
+
         <FixMapSize />
 
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
